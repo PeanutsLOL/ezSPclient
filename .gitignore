@@ -1,0 +1,34 @@
+# 依赖与构建产物
+node_modules/
+/src-tauri/target/
+/src-tauri/gen/
+
+# 前端/打包输出
+dist/
+*.msi
+*.nsis
+*.dmg
+*.AppImage
+*.deb
+*.apk
+*.aab
+
+# 本地运行期数据（配置默认在系统用户目录，这里只防手滑放进仓库）
+*.local.json
+logs/
+*.log
+
+# 编辑器与系统
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 暂存与临时
+.tmp/
+tmp/
+*.rs.bk
+*.pdb

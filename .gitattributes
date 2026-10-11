@@ -1,0 +1,15 @@
+# 默认按内容判断，文本文件在仓库里统一 LF（Windows 检出时由 core.autocrlf 决定工作区）
+* text=auto eol=lf
+
+# 二进制资源，不做行尾/合并处理
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ico  binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+
+# 锁文件在合并时视为生成物，冲突就重新生成
+pnpm-lock.yaml merge=binary diff=false

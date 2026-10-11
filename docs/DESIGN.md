@@ -102,10 +102,10 @@ src-tauri/               Rust 后端
 {
   "version": 1,
   "probePorts": [3000, 80, 54321],  // 未写端口时依次探测的顺序
-  "autoConnect": true,              // 启动后自动连接 activeId（且探活通过）
+  "autoProbe": true,                // 启动后自动探活上次使用的服务器（只探活，不自动开窗）
   "gameFullscreen": true,           // 游戏窗口默认全屏
-  "isolateStorage": true,           // 每个服务器独立缓存（仅桌面）
-  "keepLauncherOpen": true,         // 打开游戏后保留启动器窗口
+  "isolateStorage": false,          // 每个服务器独立缓存（仅桌面；首次加载会慢一点）
+  "minimizeOnConnect": true,        // 打开游戏后把启动器最小化
   "language": "zh"                  // zh / en
 }
 ```

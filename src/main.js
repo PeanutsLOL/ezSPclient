@@ -80,6 +80,7 @@ const STRINGS = {
     errSpace: '地址里不能有空格',
     probeSummary: '测速完成：{0} 在线 / {1} 离线',
     backToLauncher: '返回启动器',
+    back: '‹ 返回列表',
     noTauri: '这个界面需要在 ezSPclient 窗口里打开。',
   },
   en: {
@@ -152,6 +153,7 @@ const STRINGS = {
     errSpace: 'Address cannot contain spaces',
     probeSummary: 'Done: {0} online / {1} offline',
     backToLauncher: 'Back to launcher',
+    back: '‹ Servers',
     noTauri: 'This UI must run inside the ezSPclient window.',
   },
 };
@@ -252,6 +254,14 @@ function parseAddress(raw) {
 
 const findServer = (id) => snap?.servers?.find((server) => server.id === id) ?? null;
 
+/** 窄屏（手机竖屏）：列表与详情分两屏显示，靠 `#layout` 的 data-view 切换。 */
+const isNarrow = () => window.matchMedia('(max-width: 760px)').matches;
+
+/** 切到列表 / 详情视图（宽屏下这两个值不起作用，双栏一直显示）。 */
+function setView(view) {
+  $('layout').dataset.view = view;
+}
+
 /** 展示用的地址：没有端口时标成"自动探测"。 */
 function displayAddress(server) {
   const authority = server.host.includes(':') ? `[${server.host}]` : server.host;
@@ -327,6 +337,7 @@ function renderList() {
   for (const card of list.querySelectorAll('.server-card')) {
     card.addEventListener('click', () => {
       selectedId = card.dataset.id;
+      if (isNarrow()) setView('detail');
       render();
     });
   }
@@ -351,7 +362,10 @@ function renderDetail() {
 
   panel.innerHTML = `
     <div class="detail-title">
-      <h2>${esc(server.name)}</h2>
+      <div class="detail-heading">
+        <button class="ghost small mobile-back" id="d-back">${esc(t('back'))}</button>
+        <h2>${esc(server.name)}</h2>
+      </div>
       <div class="play-row">
         <button class="ghost small" id="d-probe" ${isProbing ? 'disabled' : ''}>${esc(t('probe'))}</button>
         <button class="ghost small" id="d-edit">${esc(t('edit'))}</button>
@@ -372,6 +386,7 @@ function renderDetail() {
     </div>
   `;
 
+  $('d-back').addEventListener('click', () => setView('list'));
   $('d-probe').addEventListener('click', () => probeOne(server.id));
   $('d-edit').addEventListener('click', () => openServerModal(server));
   $('d-del').addEventListener('click', (event) => requestDelete(server.id, event.currentTarget));
@@ -489,20 +504,19 @@ function renderEmbed() {
   if (!layer) {
     layer = document.createElement('div');
     layer.id = 'embed-layer';
+    // 只有一个小小的浮标：全屏下空间都留给游戏，浮标半透明不挡画面
     layer.innerHTML = `
-      <div class="embed-bar">
-        <span id="embed-title"></span>
-        <button id="embed-exit" class="ghost small"></button>
-      </div>
-      <iframe id="embed-frame" allow="fullscreen; autoplay; gamepad" allowfullscreen></iframe>`;
+      <iframe id="embed-frame" allow="fullscreen; autoplay; gamepad" allowfullscreen></iframe>
+      <button id="embed-exit" class="embed-exit"></button>`;
     document.body.appendChild(layer);
     layer.querySelector('#embed-exit').addEventListener('click', exitEmbed);
   }
 
   const frame = layer.querySelector('#embed-frame');
   if (frame.getAttribute('src') !== embedded.url) frame.setAttribute('src', embedded.url);
-  layer.querySelector('#embed-title').textContent = embedded.name;
-  layer.querySelector('#embed-exit').textContent = t('backToLauncher');
+  const exit = layer.querySelector('#embed-exit');
+  exit.textContent = `‹ ${embedded.name}`;
+  exit.title = t('backToLauncher');
 }
 
 function exitEmbed() {
@@ -590,6 +604,7 @@ async function submitServerForm(event) {
     await refresh(next);
     if (!editingId) selectedId = next.servers[next.servers.length - 1].id;
     closeModal('server-modal');
+    if (isNarrow()) setView('detail');
     toast(t('saved'));
     render();
   } catch (message) {

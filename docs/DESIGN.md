@@ -145,7 +145,10 @@ src-tauri/               Rust 后端
 ## 8. 安全与合规
 
 - **远端页面不授予任何 Tauri 权限**：capabilities 里只对本地启动器页面生效；游戏页面拿不到 IPC。这是外壳类应用最常见的漏洞点。
-- CSP：启动器页面限制为 `default-src 'self'`，不允许内联脚本（v0.1 的 JS 全在 `main.js`）。
+- CSP：启动器页面限制为 `default-src 'self'`，但**必须额外放行 `frame-src http: https:`** —— 移动端要把游戏内嵌进启动器页面，
+  否则会被 `ERR_BLOCKED_BY_CSP` 拦掉（桌面端走独立窗口，看不到这个问题）。
+- 移动端：整机锁 `sensorLandscape` + 沉浸式全屏（`WindowInsetsControllerCompat` 隐藏系统栏、下滑可临时唤出），
+  因为游戏是横屏的、需要占满整屏；内嵌层只留一个半透明浮标作为返回入口。
 - **明文 HTTP**：游戏走 http/ws（无证书），所以必须显式允许明文：Android 需要 `usesCleartextTraffic`/network-security-config，iOS 需要 ATS 例外，桌面无限制。这点在打包移动端时必须做，否则连接会静默失败。
 - 配置文件不含任何凭据（只有地址），可以放心导出分享。
 - 不采集任何遥测。

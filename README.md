@@ -4,6 +4,12 @@
 
 ![启动器界面](docs/screenshot.png)
 
+手机上（Android，横屏全屏；左：启动器，右：内嵌运行的游戏）：
+
+| 启动器 | 内嵌游戏 |
+|---|---|
+| ![手机启动器](docs/screenshot-android-launcher.png) | ![手机内嵌游戏](docs/screenshot-android.png) |
+
 游戏本体是纯前端的网页游戏（HTTP + WebSocket），跑在你自己或朋友的机器上。ezSPclient **不重写游戏**，只解决网页浏览器缺失的那部分体验：
 
 | 能力 | 说明 |

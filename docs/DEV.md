@@ -167,8 +167,18 @@ Invoke-WebRequest "https://mirrors.cloud.tencent.com/gradle/$ver.zip" -OutFile "
 **明文 HTTP 必须处理**：`tauri android init` 生成的 `app/build.gradle.kts` 里，
 `usesCleartextTraffic` 在 **debug 是 `true`、release 是 `false`**（manifest 用
 `${usesCleartextTraffic}` 占位符）。游戏服务器是明文 HTTP，release 不改就会静默连不上
-（请求被系统掐掉，页面报错也不明显）。因为 `src-tauri/gen/` 是可再生的（被 gitignore），
-这一步交给幂等的 `tools/patch-android.py`，`pnpm android:*` 会自动调用。
+（请求被系统掐掉，页面报错也不明显）。
+
+**锁横屏 + 沉浸式全屏**：游戏是横屏的，所以 patch 脚本会往 `AndroidManifest.xml` 的
+`<activity>` 加 `android:screenOrientation="sensorLandscape"`，并给生成的 `MainActivity.kt`
+加 `hideSystemBars()`（`WindowInsetsControllerCompat`，`BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`）。
+两者都在 `tools/patch-android.py` 里，因为 `src-tauri/gen/` 是可再生的（被 gitignore），
+补丁必须可复现；`pnpm android:*` 会自动调用它（幂等）。
+
+**启动器 CSP 必须放行 iframe**：`tauri.conf.json` 的 `app.security.csp` 里若只有
+`default-src 'self'`，移动端内嵌的游戏会被 `frame-src` 继承的规则拦掉，真机表现为
+`net::ERR_BLOCKED_BY_CSP`（桌面端看不出来，因为桌面是独立窗口加载远端地址、不经过启动器 CSP）。
+改动 CSP 后要重新 `android:build` 才会生效。
 
 **release 签名**：模板不带任何签名配置，所以脚本会在 `keystore.properties` 存在时
 自动往 `app/build.gradle.kts` 里插入 `signingConfigs` 并挂到 release 构建类型上。生成 keystore：

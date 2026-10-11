@@ -20,6 +20,21 @@
   box-sizing: border-box;
 }
 
+/* 深色滚动条：默认那条亮色滚动条在手机上很扎眼 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a3a34;
+  border-radius: 3px;
+}
+
 html,
 body {
   height: 100%;
@@ -57,6 +72,10 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
+  /* Android 15+ 强制 edge-to-edge / iOS 刘海：内容要自己避开系统栏 */
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
   border-bottom: 1px solid var(--line-soft);
   background: linear-gradient(180deg, #121917, #0e1412);
 }
@@ -247,6 +266,13 @@ body {
   gap: 10px;
 }
 
+.detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .detail-title h2 {
   margin: 0;
   font-size: 18px;
@@ -368,6 +394,7 @@ button.icon {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line-soft);
   background: #0e1412;
 }
@@ -486,36 +513,121 @@ button.icon {
   position: fixed;
   inset: 0;
   z-index: 60;
-  display: flex;
-  flex-direction: column;
   background: #05090c;
-}
-
-.embed-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
-  background: #0e1412;
-  border-bottom: 1px solid var(--line-soft);
-  font-size: 13px;
-  /* 全面屏手机的刘海/手势条 */
-  padding-top: max(6px, env(safe-area-inset-top));
-  padding-left: max(10px, env(safe-area-inset-left));
-  padding-right: max(10px, env(safe-area-inset-right));
-}
-
-#embed-title {
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 #embed-frame {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   width: 100%;
+  height: 100%;
   border: 0;
   background: #05090c;
+}
+
+/* 退出浮标：半透明、靠安全区，平时几乎看不见，点/悬停才显形 */
+.embed-exit {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  z-index: 2;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(53, 208, 165, 0.35);
+  background: rgba(10, 14, 13, 0.72);
+  color: var(--text);
+  opacity: 0.45;
+  transition: opacity 0.2s;
+}
+
+.embed-exit:hover,
+.embed-exit:focus,
+.embed-exit:active {
+  opacity: 1;
+}
+
+/* ---------- 窄屏（手机竖屏）：单栏 + 列表/详情两视图 ---------- */
+
+/** 返回按钮只在窄屏出现（宽屏是双栏，不需要）。 */
+.mobile-back {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .brand-logo {
+    width: 28px;
+    height: 28px;
+  }
+
+  .brand-name {
+    font-size: 14px;
+  }
+
+  /* 手机上一行放不下三行副标题，省掉它 */
+  .brand-sub {
+    display: none;
+  }
+
+  .topbar-actions button {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  /* 一次只显示一个面板，靠 data-view 切换，选服务器即进详情 */
+  .layout[data-view='list'] .detail-panel {
+    display: none;
+  }
+
+  .layout[data-view='detail'] .servers-panel {
+    display: none;
+  }
+
+  .mobile-back {
+    display: inline-block;
+  }
+
+  .detail-panel {
+    padding: 14px;
+  }
+
+  /* 手机上标题 + 三个按钮一行放不下，允许换行 */
+  .detail-title {
+    flex-wrap: wrap;
+  }
+
+  .kv {
+    grid-template-columns: 84px 1fr;
+  }
+
+  .statusbar {
+    padding: 6px 12px;
+    gap: 6px;
+  }
+
+  .statusbar button {
+    padding: 5px 9px;
+    font-size: 11px;
+  }
+
+  #config-path {
+    max-width: 34vw;
+    font-size: 10px;
+  }
 }

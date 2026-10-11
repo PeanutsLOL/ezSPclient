@@ -1,6 +1,6 @@
 [package]
 name = "ezspclient"
-version = "0.1.0"
+version = "0.2.0"
 description = "《卫戍协议：盟约》多平台客户端 —— WebView 外壳 + 服务器地址簿"
 authors = ["PeanutsLOL"]
 edition = "2021"

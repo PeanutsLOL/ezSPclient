@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>ezSPclient · 卫戍协议</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="icon.png" alt="" />
+        <div class="brand-text">
+          <div class="brand-name">ezSPclient</div>
+          <div class="brand-sub" data-i18n="brandSub"></div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-probe-all" class="ghost small" data-i18n="probeAll"></button>
+        <button id="btn-settings" class="ghost small" data-i18n="settings"></button>
+        <button id="btn-lang" class="ghost small" title="中文 / English">中/EN</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel servers-panel">
+        <div class="panel-head">
+          <h2 data-i18n="servers"></h2>
+          <button id="btn-add" class="primary small" data-i18n="add"></button>
+        </div>
+        <ul id="server-list" class="server-list"></ul>
+        <p id="empty-hint" class="empty" data-i18n="emptyHint" hidden></p>
+      </aside>
+
+      <section class="panel detail-panel" id="detail"></section>
+    </main>
+
+    <footer class="statusbar">
+      <span id="config-path" class="mono dim" title=""></span>
+      <span class="grow"></span>
+      <button id="btn-export" class="ghost small" data-i18n="export"></button>
+      <button id="btn-import" class="ghost small" data-i18n="import"></button>
+      <button id="btn-reset" class="ghost small danger" data-i18n="reset"></button>
+      <span id="version" class="mono dim"></span>
+    </footer>
+
+    <!-- 添加 / 编辑服务器 -->
+    <div id="server-modal" class="modal" hidden>
+      <form id="server-form" class="modal-card">
+        <h3 id="server-modal-title"></h3>
+        <label>
+          <span data-i18n="fieldName"></span>
+          <input id="f-name" autocomplete="off" maxlength="40" />
+        </label>
+        <label>
+          <span data-i18n="fieldAddress"></span>
+          <input id="f-address" autocomplete="off" spellcheck="false" placeholder="192.168.1.10:3000" required />
+        </label>
+        <label>
+          <span data-i18n="fieldNote"></span>
+          <input id="f-note" autocomplete="off" maxlength="80" />
+        </label>
+        <p class="hint" data-i18n="addressHint"></p>
+        <p id="form-error" class="error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-close data-i18n="cancel"></button>
+          <button type="submit" class="primary" data-i18n="save"></button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 设置 -->
+    <div id="settings-modal" class="modal" hidden>
+      <form id="settings-form" class="modal-card">
+        <h3 data-i18n="settings"></h3>
+        <label>
+          <span data-i18n="setProbePorts"></span>
+          <input id="s-ports" autocomplete="off" spellcheck="false" placeholder="3000, 80, 54321" />
+        </label>
+        <p class="hint" data-i18n="setProbePortsHint"></p>
+        <label class="check"><input id="s-auto-probe" type="checkbox" /><span data-i18n="setAutoProbe"></span></label>
+        <label class="check"><input id="s-fullscreen" type="checkbox" /><span data-i18n="setFullscreen"></span></label>
+        <label class="check"><input id="s-isolate" type="checkbox" /><span data-i18n="setIsolate"></span></label>
+        <p class="hint" data-i18n="setIsolateHint"></p>
+        <label class="check"><input id="s-minimize" type="checkbox" /><span data-i18n="setMinimize"></span></label>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-close data-i18n="cancel"></button>
+          <button type="submit" class="primary" data-i18n="save"></button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 导入 / 导出（剪贴板在 WebView 里不可靠，用文本框更稳） -->
+    <div id="io-modal" class="modal" hidden>
+      <div class="modal-card">
+        <h3 id="io-title"></h3>
+        <p class="hint" id="io-hint"></p>
+        <textarea id="io-text" spellcheck="false" rows="10"></textarea>
+        <p id="io-error" class="error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost" data-close data-i18n="cancel"></button>
+          <button type="button" id="io-copy" class="ghost" data-i18n="copy"></button>
+          <button type="button" id="io-apply" class="primary" data-i18n="apply"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="main.js"></script>
+  </body>
+</html>

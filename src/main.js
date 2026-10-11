@@ -170,7 +170,8 @@ function t(key, ...args) {
 // 后端
 // ---------------------------------------------------------------------------
 
-const invoke = (command, args) => window.__TAURI__.core.invoke(command, args);
+/** 调后端命令；无参数的命令也显式传 `{}`，避免个别 Tauri 版本对 undefined 的处理差异。 */
+const invoke = (command, args = {}) => window.__TAURI__.core.invoke(command, args);
 
 // ---------------------------------------------------------------------------
 // 状态

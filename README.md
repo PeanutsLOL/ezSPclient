@@ -2,6 +2,8 @@
 
 《卫戍协议：盟约》(Stronghold Protocol) 的**多平台客户端** —— 一个轻量 WebView 外壳 + 服务器地址簿。
 
+![启动器界面](docs/screenshot.png)
+
 游戏本体是纯前端的网页游戏（HTTP + WebSocket），跑在你自己或朋友的机器上。ezSPclient **不重写游戏**，只解决网页浏览器缺失的那部分体验：
 
 | 能力 | 说明 |

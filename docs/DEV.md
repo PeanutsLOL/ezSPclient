@@ -102,6 +102,16 @@ pnpm icon                        # = tauri icon src/icon.png，派生各平台�
 - 探活不通过时先手动验一遍游戏服务器：
   `curl http://<地址>/healthz` 应返回 `{"ok":true,...}`。
 
+### 没有真实服务器时怎么调
+
+```bash
+python tools/fake-health-server.py --port 3000     # 只在 127.0.0.1:3000 应答 /healthz
+```
+
+它把收到的每个请求写进 `probe-hit.log`（含 `Host` 与 `User-Agent`）。把 `127.0.0.1:3000`
+加进地址簿，就能验证「前端 → IPC → Rust 探活 → HTTP」整条链路：日志里出现
+`UA=ezSPclient/…` 的 `/healthz` 行即为通。这条链路也是发布前的验收步骤之一。
+
 ## 6. 移动端
 
 Tauri v2 支持 Android / iOS，但需要额外工具链（v0.1 未验证）：

@@ -77,6 +77,14 @@ pnpm icon                        # = tauri icon src/icon.png，派生各平台�
 
 改了徽记配色/形状就改 `tools/make-icon.py` 里的常量，然后重跑这两条命令；`src-tauri/icons/` 需要一起提交。
 
+生成 README 用的启动器截图（会抓取指定标题的窗口，不入库的运行期辅助脚本）：
+
+```bash
+python tools/ui-shot.py --title ezSPclient --out docs/screenshot.png --width 1100
+```
+
+截图请务必用**中性示例数据**（示例域名 `game.example.com`、本机 `127.0.0.1`），不要带真实服务器地址、本机用户目录路径（状态栏那条 `C:\Users\<name>\...` 记得裁掉）。
+
 ## 4. 配置与数据位置
 
 启动器把两个 JSON 放在系统配置目录（`app_config_dir()`）：

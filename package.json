@@ -3,7 +3,7 @@
   "version": "0.2.1",
   "private": true,
   "description": "《卫戍协议：盟约》多平台客户端 —— WebView 外壳 + 服务器地址簿",
-  "license": "UNLICENSED",
+  "license": "Unlicense",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

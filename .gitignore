@@ -9,6 +9,18 @@ node_modules/
 keystore.properties
 *.pepk
 
+# 凭据与环境（本仓库用不到，纯属防手滑）
+.env
+.env.*
+!.env.example
+credentials*.json
+service[_-]account*.json
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+
 # 前端/打包输出
 dist/
 *.msi

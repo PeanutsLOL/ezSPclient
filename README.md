@@ -4,11 +4,9 @@
 
 ![启动器界面](docs/screenshot.png)
 
-手机上（Android，横屏全屏；左：启动器，右：内嵌运行的游戏）：
+手机上（Android，横屏 + 沉浸式全屏，游戏内嵌运行）：
 
-| 启动器 | 内嵌游戏 |
-|---|---|
-| ![手机启动器](docs/screenshot-android-launcher.png) | ![手机内嵌游戏](docs/screenshot-android.png) |
+![手机内嵌游戏](docs/screenshot-android.png)
 
 游戏本体是纯前端的网页游戏（HTTP + WebSocket），跑在你自己或朋友的机器上。ezSPclient **不重写游戏**，只解决网页浏览器缺失的那部分体验：
 
@@ -53,4 +51,6 @@ pnpm tauri build    # 打包
 
 ## 许可
 
-本项目自身暂未选择许可证。游戏素材与商标版权归上海鹰角网络 / Yostar，仅限非商业同人使用。
+本仓库（客户端代码 + `tools/make-icon.py` 自绘的图标）采用 [Unlicense](LICENSE)：**公有领域**，随便用、改、卖、重新分发，连署名都不需要，也不提供任何担保。
+
+游戏《卫戍协议：盟约》本体的代码、素材与商标版权归上海鹰角网络 / Yostar，与本许可证无关 —— 本仓库不含任何游戏素材，客户端也只是把网页版装进 WebView。

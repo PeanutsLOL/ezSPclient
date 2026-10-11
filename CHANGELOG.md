@@ -31,6 +31,13 @@
 → 选模式/难度、输入代号开局（`PhoneTest DOCTOR #4542`，触控与键盘输入正常）
 → 点浮标返回启动器（状态保留）
 
+### 文档
+
+- 公开到 GitHub 前脱敏：README / CHANGELOG / 界面示例里的真实服务器地址改成 `game.example.com`；
+  截图裁掉本机用户目录路径与真实地址（截图用中性示例数据重新生成）
+- 明确许可证：**Unlicense**（公有领域；见 [LICENSE](LICENSE)）
+- `.gitignore` 补上 `.env` / `credentials*.json` / `*.pem` / `*.p12` 等凭据类文件的兜底规则
+
 ## [0.2.0] - 2026-10-12
 
 移动端打包（Android）。桌面端行为不变。

@@ -1,0 +1,6 @@
+{
+  "identifier": "launcher",
+  "description": "启动器窗口（本地页面）的权限。刻意不写 remote：远端游戏页面因此拿不到任何 IPC 能力。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

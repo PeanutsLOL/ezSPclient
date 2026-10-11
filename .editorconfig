@@ -1,0 +1,23 @@
+# 统一编辑器行为（.gitattributes 已规定仓库内统一 LF）
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{js,mjs,json,css,html}]
+indent_style = space
+indent_size = 2
+
+[*.{rs,toml}]
+indent_style = space
+indent_size = 4
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.py]
+indent_style = space
+indent_size = 4

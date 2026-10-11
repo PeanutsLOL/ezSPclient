@@ -66,7 +66,18 @@ pnpm test               # = cargo test（probe/config 的单元测试）
 | macOS | `src-tauri/target/release/bundle/dmg/*.dmg` |
 | Linux | `src-tauri/target/release/bundle/deb/*.deb`、`.../appimage/*.AppImage` |
 
-## 3. 配置与数据位置
+## 3. 图标
+
+应用图标是脚本生成的，不依赖设计工具：
+
+```bash
+python tools/make-icon.py        # 生成 src/icon.png（1024×1024，纯标准库）
+pnpm icon                        # = tauri icon src/icon.png，派生各平台图标到 src-tauri/icons/
+```
+
+改了徽记配色/形状就改 `tools/make-icon.py` 里的常量，然后重跑这两条命令；`src-tauri/icons/` 需要一起提交。
+
+## 4. 配置与数据位置
 
 启动器把两个 JSON 放在系统配置目录（`app_config_dir()`）：
 
@@ -83,7 +94,7 @@ pnpm test               # = cargo test（probe/config 的单元测试）
 
 界面右下角会显示当前配置目录，方便排查。
 
-## 4. 调试
+## 5. 调试
 
 - 启动器窗口：`F12` 或右键 → 检查（仅调试构建；发布构建里 devtools 默认关闭）。
 - 游戏窗口：按 `Ctrl+Shift+I`（调试构建）。
@@ -91,7 +102,7 @@ pnpm test               # = cargo test（probe/config 的单元测试）
 - 探活不通过时先手动验一遍游戏服务器：
   `curl http://<地址>/healthz` 应返回 `{"ok":true,...}`。
 
-## 5. 移动端
+## 6. 移动端
 
 Tauri v2 支持 Android / iOS，但需要额外工具链（v0.1 未验证）：
 
@@ -108,7 +119,7 @@ pnpm tauri android dev
 2. 游戏走明文 HTTP，Android 需要开启 `usesCleartextTraffic`（或 network-security-config），
    iOS 需要 ATS 例外，否则连接会静默失败。
 
-## 6. 常见问题
+## 7. 常见问题
 
 | 现象 | 处理 |
 |---|---|

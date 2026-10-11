@@ -1,6 +1,6 @@
 {
   "name": "ezspclient",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "《卫戍协议：盟约》多平台客户端 —— WebView 外壳 + 服务器地址簿",
   "license": "UNLICENSED",
@@ -13,7 +13,12 @@
     "lint": "cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri",
-    "icon": "tauri icon src/icon.png"
+    "icon": "tauri icon src/icon.png",
+    "android:init": "tauri android init --ci && python tools/patch-android.py",
+    "android:patch": "python tools/patch-android.py",
+    "android:dev": "python tools/patch-android.py && tauri android dev",
+    "android:build": "python tools/patch-android.py && tauri android build --apk --target aarch64",
+    "android:build:debug": "python tools/patch-android.py && tauri android build --debug --apk --target aarch64"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"

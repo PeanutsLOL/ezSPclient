@@ -37,19 +37,25 @@ Tauri v2 一套 Rust 核心 + 一份前端，覆盖 Windows / macOS / Linux / An
 | | 桌面 | 移动 |
 |---|---|---|
 | 启动器 UI | 主窗口（本地页面） | 主 WebView（本地页面） |
-| 打开游戏 | **新开一个窗口**加载远端地址，启动器窗口保留 | 把**当前 WebView** 导航到远端地址（移动端没有多窗口） |
-| 返回启动器 | 关闭游戏窗口 | 回到本地页面（Android 返回键 / 界面上的返回按钮） |
-| 缓存隔离 | `data_directory`（WebView2 user data folder） | 同一分区（受平台限制） |
+| 打开游戏 | **新开一个窗口**加载远端地址，启动器窗口保留 | **全屏 iframe 内嵌**在当前界面里（移动端没有多窗口） |
+| 返回启动器 | 关闭游戏窗口 | 顶部「返回启动器」条 / Android 返回键 / ESC |
+| 缓存隔离 | `data_directory`（WebView2 user data folder），可关 | iframe 按域名天然隔离，无需配置 |
 
-实现上用一个 `open_game` 命令封装差异，前端只调它：
+移动端选 iframe 而不是"导航整个 WebView"的原因：导航走了以后启动器页面就没了，只能靠系统返回键
+（Tauri 在 Android 上并不保证把它映射成 WebView 历史后退）；iframe 让启动器和游戏共存，返回入口
+永远在，还顺带把各服务器的存储按域名隔离开了。前提是游戏服务器不禁止被内嵌——已确认它不返回
+`X-Frame-Options` / `frame-ancestors`。
+
+实现上用一个 `open_game` 命令封装差异，前端按返回的 `mode` 分流：
 
 ```rust
 #[tauri::command]
-async fn open_game(app: AppHandle, id: String, room: Option<String>) -> Result<String, String>
+fn open_game(...) -> Result<GameTarget, String>;   // GameTarget { mode: "window" | "embed", label, url }
 ```
 
-- 桌面：`WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))`，label 用 `game-<serverId>`，重复点击同一服务器就聚焦已有窗口。
-- 移动：返回一个标记，由前端执行 `location.replace(url)`（v0.1 先把桌面路径做扎实，移动端分支留接口）。
+- 桌面：`WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))`，label 用 `game-<serverId>`，
+  重复点击同一服务器就聚焦已有窗口；「打开后最小化启动器」也在 Rust 侧做（前端不需要 window 权限）。
+- 移动：不建窗口，回 `mode = "embed"` 与 url，前端渲染 `#embed-layer`（一条顶栏 + 一个 `allowfullscreen` 的 iframe）。
 
 ## 4. 架构与目录
 

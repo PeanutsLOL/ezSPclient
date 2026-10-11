@@ -479,3 +479,43 @@ button.icon {
 .toast.bad {
   border-color: var(--danger);
 }
+
+/* ---------- 移动端：游戏内嵌层 ---------- */
+
+#embed-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: #05090c;
+}
+
+.embed-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  background: #0e1412;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  /* 全面屏手机的刘海/手势条 */
+  padding-top: max(6px, env(safe-area-inset-top));
+  padding-left: max(10px, env(safe-area-inset-left));
+  padding-right: max(10px, env(safe-area-inset-right));
+}
+
+#embed-title {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#embed-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #05090c;
+}

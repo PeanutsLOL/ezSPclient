@@ -79,6 +79,7 @@ const STRINGS = {
     errHttps: 'v0.1 只支持 http，请去掉 https://',
     errSpace: '地址里不能有空格',
     probeSummary: '测速完成：{0} 在线 / {1} 离线',
+    backToLauncher: '返回启动器',
     noTauri: '这个界面需要在 ezSPclient 窗口里打开。',
   },
   en: {
@@ -150,6 +151,7 @@ const STRINGS = {
     errHttps: 'v0.1 only supports http — drop the https://',
     errSpace: 'Address cannot contain spaces',
     probeSummary: 'Done: {0} online / {1} offline',
+    backToLauncher: 'Back to launcher',
     noTauri: 'This UI must run inside the ezSPclient window.',
   },
 };
@@ -182,6 +184,8 @@ let selectedId = null;
 let editingId = null; // null = 新增
 let ioMode = null; // 'export' | 'import'
 let roomKey = '';
+/** 移动端的游戏内嵌状态：{ id, name, url }；null = 没在内嵌。 */
+let embedded = null;
 const probing = new Set();
 let confirmTimer = null;
 let pendingDeleteId = null;
@@ -372,7 +376,13 @@ function renderDetail() {
   $('d-edit').addEventListener('click', () => openServerModal(server));
   $('d-del').addEventListener('click', (event) => requestDelete(server.id, event.currentTarget));
   $('d-play').addEventListener('click', () => connect(server.id));
-  $('d-close').addEventListener('click', () => invoke('close_game', { id: server.id }));
+  $('d-close').addEventListener('click', () => {
+    if (embedded?.id === server.id) {
+      exitEmbed();
+      return;
+    }
+    invoke('close_game', { id: server.id }).catch((error) => toast(String(error), true));
+  });
   $('d-room').addEventListener('input', (event) => {
     roomKey = event.target.value.trim().toUpperCase();
   });
@@ -443,16 +453,63 @@ async function connect(id) {
 
   try {
     await refresh(await invoke('set_active', { id }));
-    const label = await invoke('open_game', {
+    const target = await invoke('open_game', {
       id,
       room: roomKey || null,
       fullscreen: snap.settings.gameFullscreen,
       isolate: snap.settings.isolateStorage,
     });
-    toast(t('gameOpened', label));
+
+    if (target.mode === 'embed') {
+      // 移动端没有多窗口：内嵌到当前界面，随时能退回来。
+      embedded = { id, name: server.name, url: target.url };
+      renderEmbed();
+      toast(t('gameOpened', server.name));
+    } else {
+      toast(t('gameOpened', target.label));
+    }
   } catch (error) {
     toast(String(error), true);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 移动端：游戏内嵌层
+// ---------------------------------------------------------------------------
+
+/** 渲染 / 更新内嵌的游戏层（没有内嵌时移除它）。 */
+function renderEmbed() {
+  const existing = $('embed-layer');
+  if (!embedded) {
+    if (existing) existing.remove();
+    return;
+  }
+
+  let layer = existing;
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'embed-layer';
+    layer.innerHTML = `
+      <div class="embed-bar">
+        <span id="embed-title"></span>
+        <button id="embed-exit" class="ghost small"></button>
+      </div>
+      <iframe id="embed-frame" allow="fullscreen; autoplay; gamepad" allowfullscreen></iframe>`;
+    document.body.appendChild(layer);
+    layer.querySelector('#embed-exit').addEventListener('click', exitEmbed);
+  }
+
+  const frame = layer.querySelector('#embed-frame');
+  if (frame.getAttribute('src') !== embedded.url) frame.setAttribute('src', embedded.url);
+  layer.querySelector('#embed-title').textContent = embedded.name;
+  layer.querySelector('#embed-exit').textContent = t('backToLauncher');
+}
+
+function exitEmbed() {
+  if (!embedded) return;
+  embedded = null;
+  renderEmbed();
+  render();
 }
 
 /** 删除做成两步确认，避免误触（两步必须落在同一台服务器上）。 */
@@ -722,9 +779,12 @@ async function init() {
     });
   }
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      for (const modal of document.querySelectorAll('.modal')) modal.hidden = true;
+    if (event.key !== 'Escape') return;
+    if (embedded) {
+      exitEmbed();
+      return;
     }
+    for (const modal of document.querySelectorAll('.modal')) modal.hidden = true;
   });
 
   // 启动后自动探活上次用的服务器（只探活，不自动开窗）。

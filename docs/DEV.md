@@ -112,22 +112,96 @@ python tools/fake-health-server.py --port 3000     # 只在 127.0.0.1:3000 应�
 加进地址簿，就能验证「前端 → IPC → Rust 探活 → HTTP」整条链路：日志里出现
 `UA=ezSPclient/…` 的 `/healthz` 行即为通。这条链路也是发布前的验收步骤之一。
 
-## 6. 移动端
+## 6. 移动端（Android / iOS）
 
-Tauri v2 支持 Android / iOS，但需要额外工具链（v0.1 未验证）：
+### Android
 
-```bash
-# Android：需要 JDK 17/21、Android SDK + NDK，并设置环境变量
-export ANDROID_HOME=<sdk>  NDK_HOME=<sdk>/ndk/<ver>
-pnpm tauri android init
-pnpm tauri android dev
+除第 1 节的要求外，还需要（下表是本机已验证的组合）：
+
+| 组件 | 版本 / 位置 | 说明 |
+|---|---|---|
+| JDK | **21**（`C:\Program Files\Microsoft\jdk-21.0.12.101-hotspot`） | Gradle 9 + AGP 不认 JDK 25。用 `winget install Microsoft.OpenJDK.21`（Temurin 从 GitHub 拉，国内常失败） |
+| Android SDK | `%LOCALAPPDATA%\Android\Sdk` | 需要 `platforms;android-37.0` 和 `build-tools;37.0.0`（CLI 模板里 `compileSdk = 37`、`minSdk = 24`） |
+| NDK | `ndk/27.3.13750724` | Rust 交叉编译要用；模板不 pin 版本，`NDK_HOME` 指到它即可 |
+| Rust targets | `aarch64-linux-android`、`armv7-linux-androideabi`、`i686-linux-android`、`x86_64-linux-android` | `rustup target add …` |
+
+```powershell
+$sdk = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_HOME = $sdk
+$env:NDK_HOME     = "$sdk\ndk\27.3.13750724"
+$env:JAVA_HOME    = 'C:\Program Files\Microsoft\jdk-21.0.12.101-hotspot'
+$env:Path = "$env:USERPROFILE\.cargo\bin;$env:JAVA_HOME\bin;$env:Path"
+
+pnpm android:init          # tauri android init --ci && python tools/patch-android.py
+pnpm android:dev           # 连上手机/模拟器直接跑
+pnpm android:build:debug   # 可安装的 debug APK（arm64）
+pnpm android:build         # release APK（需要签名，见下）
 ```
 
-移动端的两点差异（见 [DESIGN.md](DESIGN.md) 第 3 节）：
+**Windows 上必须先开「开发人员模式」**：Tauri 在打包时会把交叉编译出来的 `.so`
+**符号链接**进 `jniLibs/`，没有开发者模式会直接失败：
 
-1. 没有多窗口，打开游戏是**导航当前 WebView**，返回启动器用系统返回键。
-2. 游戏走明文 HTTP，Android 需要开启 `usesCleartextTraffic`（或 network-security-config），
-   iOS 需要 ATS 例外，否则连接会静默失败。
+```
+Failed to create a symbolic link ... Creation symbolic link is not allowed for this system.
+```
+
+开启方式：设置 → 系统 → 开发者选项 → 开发人员模式；或以管理员身份执行
+
+```powershell
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v AllowDevelopmentWithoutDevLicense /d 1 /f
+```
+
+开启后**不需要重新登录**，新起的进程立刻可用（实测过）。硬链接、复制都不行 —— Tauri 会先删掉目标再建符号链接。
+
+**Gradle 发行包下载**：`gradlew` 首次运行要从 `services.gradle.org` 下 `gradle-9.6.1-bin.zip`
+（约 134 MB），国内经常超时。两个办法：
+
+```powershell
+# 办法一：从镜像下载后放进 wrapper 的缓存目录，让它跳过下载
+$ver = 'gradle-9.6.1-bin'; $dir = Get-ChildItem "$env:USERPROFILE\.gradle\wrapper\dists\$ver" -Directory | Select-Object -First 1
+Invoke-WebRequest "https://mirrors.cloud.tencent.com/gradle/$ver.zip" -OutFile "$($dir.FullName)\$ver.zip"
+
+# 办法二：改 src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties 里的 distributionUrl 指向镜像
+```
+
+**明文 HTTP 必须处理**：`tauri android init` 生成的 `app/build.gradle.kts` 里，
+`usesCleartextTraffic` 在 **debug 是 `true`、release 是 `false`**（manifest 用
+`${usesCleartextTraffic}` 占位符）。游戏服务器是明文 HTTP，release 不改就会静默连不上
+（请求被系统掐掉，页面报错也不明显）。因为 `src-tauri/gen/` 是可再生的（被 gitignore），
+这一步交给幂等的 `tools/patch-android.py`，`pnpm android:*` 会自动调用。
+
+**release 签名**：模板不带任何签名配置，所以脚本会在 `keystore.properties` 存在时
+自动往 `app/build.gradle.kts` 里插入 `signingConfigs` 并挂到 release 构建类型上。生成 keystore：
+
+```powershell
+$keytool = "$env:JAVA_HOME\bin\keytool.exe"      # JDK 21 自带的 keytool
+$dir = "$env:USERPROFILE\.ezspclient"; New-Item -ItemType Directory -Force $dir | Out-Null
+& $keytool -genkeypair -v -keystore "$dir\ezspclient-release.jks" -alias ezspclient `
+  -keyalg RSA -keysize 2048 -validity 10000 -storepass <你的密码> -keypass <你的密码> `
+  -dname "CN=ezSPclient, O=ezSPclient, C=CN"
+```
+
+然后在 `src-tauri/gen/android/keystore.properties` 里写（**路径用正斜杠**，java.util.Properties
+会把反斜杠当转义符；这个文件和 keystore 都不要入库）：
+
+```properties
+storeFile=C:/Users/<你>/.ezspclient/ezspclient-release.jks
+storePassword=<你的密码>
+keyAlias=ezspclient
+keyPassword=<你的密码>
+```
+
+keystore 丢了就没法给同一个包名（`top.rakkasei.ezspclient`）发布更新，只能让用户卸载重装 —— 自己留好备份。
+
+**移动端窗口模型**：没有多窗口，`open_game` 返回 `mode = "embed"`，前端用全屏 iframe 内嵌游戏，
+顶部留一条「返回启动器」（Android 返回键 / ESC 也一样）。iframe 天然按域名隔离各服务器的存储，
+所以移动端不需要桌面那套 `isolateStorage` 配置。
+
+### iOS
+
+需要 macOS + Xcode，Windows 上无法构建。代码已经按 `#[cfg(mobile)]` 分支写好，
+在 macOS 上 `pnpm tauri ios init` 后即可；同样要注意明文 HTTP 需要在 `Info.plist`
+里加 ATS 例外（`NSAppTransportSecurity` → `NSAllowsArbitraryLoads`）。
 
 ## 7. 常见问题
 

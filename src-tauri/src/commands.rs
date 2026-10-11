@@ -7,9 +7,24 @@ use crate::probe::{self, ProbeResult};
 use crate::state::{
     self, AddressBook, AppSnapshot, Server, ServerInput, Settings, SCHEMA_VERSION, SERVERS_FILE, SETTINGS_FILE,
 };
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State as TauriState, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, State as TauriState};
+#[cfg(desktop)]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+/// 打开游戏的结果。
+///
+/// 桌面与移动端的窗口模型不同（见 docs/DESIGN.md 第 3 节），用 `mode` 让前端知道该怎么办：
+/// `window` = 已经在独立窗口里打开（桌面）；`embed` = 前端用 iframe 内嵌这个 url（移动端没有多窗口）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameTarget {
+    pub mode: &'static str,
+    pub label: String,
+    pub url: String,
+}
 
 /// 应用运行期状态：配置目录 + 内存里的地址簿与设置。
 pub struct AppState {
@@ -196,7 +211,7 @@ pub fn record_probe(
 /// 打开游戏窗口。
 ///
 /// - 桌面：新开一个窗口，已经是打开状态就聚焦（不会开出第二个）。
-/// - 移动端：返回 `mobile` 提示，前端改为导航当前 WebView（见 docs/DESIGN.md 第 3 节）。
+/// - 移动端：没有多窗口，返回 `embed` 让前端用 iframe 内嵌（见 docs/DESIGN.md 第 3 节）。
 #[tauri::command]
 pub fn open_game(
     app: AppHandle,
@@ -205,7 +220,7 @@ pub fn open_game(
     room: Option<String>,
     fullscreen: Option<bool>,
     isolate: Option<bool>,
-) -> Result<String, String> {
+) -> Result<GameTarget, String> {
     let (host, port) = {
         let book = state.book.lock().expect("地址簿锁中毒");
         let server = book.servers.iter().find(|s| s.id == id).ok_or_else(|| format!("找不到服务器 {id}"))?;
@@ -224,57 +239,69 @@ pub fn open_game(
         url.push_str(&format!("?room={room}"));
     }
 
-    let label = format!("game-{id}");
-    if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.set_focus();
-        if let Some(fullscreen) = fullscreen {
-            let _ = existing.set_fullscreen(fullscreen);
+    #[cfg(mobile)]
+    {
+        let _ = (app, fullscreen, isolate);
+        Ok(GameTarget { mode: "embed", label: String::new(), url })
+    }
+
+    #[cfg(desktop)]
+    {
+        let label = format!("game-{id}");
+        if let Some(existing) = app.get_webview_window(&label) {
+            let _ = existing.set_focus();
+            if let Some(fullscreen) = fullscreen {
+                let _ = existing.set_fullscreen(fullscreen);
+            }
+            return Ok(GameTarget { mode: "window", label, url });
         }
-        return Ok(label);
-    }
 
-    let parsed = url.parse::<tauri::Url>().map_err(|e| format!("地址不合法（{url}）：{e}"))?;
-    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
-        .title(format!("卫戍协议 · {authority}"))
-        .inner_size(1280.0, 760.0)
-        .min_inner_size(720.0, 480.0)
-        .fullscreen(fullscreen.unwrap_or(true))
-        .center();
+        let parsed = url.parse::<tauri::Url>().map_err(|e| format!("地址不合法（{url}）：{e}"))?;
+        let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
+            .title(format!("卫戍协议 · {authority}"))
+            .inner_size(1280.0, 760.0)
+            .min_inner_size(720.0, 480.0)
+            .fullscreen(fullscreen.unwrap_or(true))
+            .center();
 
-    // 每个服务器一个 WebView2 用户数据目录：房间密钥、缓存、localStorage 互不影响。
-    // 仅 Windows / Linux 支持；移动端受平台限制（见 DESIGN 第 3 节）。
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    if isolate.unwrap_or(false) {
-        let dir = app
-            .path()
-            .app_local_data_dir()
-            .map_err(|e| format!("无法定位数据目录：{e}"))?
-            .join("profiles")
-            .join(&label);
-        std::fs::create_dir_all(&dir).map_err(|e| format!("创建缓存目录失败：{e}"))?;
-        builder = builder.data_directory(dir);
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    let _ = isolate;
-
-    let window = builder.build().map_err(|e| format!("打开游戏窗口失败：{e}"))?;
-    let _ = window.set_focus();
-
-    // 打开游戏后按设置把启动器收起来（做在 Rust 侧，前端不需要 window 权限）。
-    if state.settings.lock().expect("设置锁中毒").minimize_on_connect {
-        if let Some(main) = app.get_webview_window("main") {
-            let _ = main.minimize();
+        // 每个服务器一个 WebView2 用户数据目录：房间密钥、缓存、localStorage 互不影响。
+        // 仅 Windows / Linux 支持；Android 上由 iframe 天然按域名隔离。
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        if isolate.unwrap_or(false) {
+            let dir = app
+                .path()
+                .app_local_data_dir()
+                .map_err(|e| format!("无法定位数据目录：{e}"))?
+                .join("profiles")
+                .join(&label);
+            std::fs::create_dir_all(&dir).map_err(|e| format!("创建缓存目录失败：{e}"))?;
+            builder = builder.data_directory(dir);
         }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        let _ = isolate;
+
+        let window = builder.build().map_err(|e| format!("打开游戏窗口失败：{e}"))?;
+        let _ = window.set_focus();
+
+        // 打开游戏后按设置把启动器收起来（做在 Rust 侧，前端不需要 window 权限）。
+        if state.settings.lock().expect("设置锁中毒").minimize_on_connect {
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.minimize();
+            }
+        }
+        Ok(GameTarget { mode: "window", label: window.label().to_string(), url })
     }
-    Ok(window.label().to_string())
 }
 
-/// 关闭某个服务器的游戏窗口。
+/// 关闭某个服务器的游戏窗口（移动端是内嵌的，由前端自己退出，这里直接成功返回）。
 #[tauri::command]
 pub fn close_game(app: AppHandle, id: String) -> Result<(), String> {
+    #[cfg(desktop)]
     if let Some(window) = app.get_webview_window(&format!("game-{id}")) {
         window.close().map_err(|e| format!("关闭窗口失败：{e}"))?;
     }
+    #[cfg(mobile)]
+    let _ = (&app, &id);
     Ok(())
 }
 

@@ -3,6 +3,12 @@ node_modules/
 /src-tauri/target/
 /src-tauri/gen/
 
+# 签名材料：绝不能入库
+*.jks
+*.keystore
+keystore.properties
+*.pepk
+
 # 前端/打包输出
 dist/
 *.msi
@@ -32,3 +38,5 @@ desktop.ini
 tmp/
 *.rs.bk
 *.pdb
+__pycache__/
+*.pyc

@@ -55,7 +55,18 @@ fn open_game(...) -> Result<GameTarget, String>;   // GameTarget { mode: "window
 
 - 桌面：`WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))`，label 用 `game-<serverId>`，
   重复点击同一服务器就聚焦已有窗口；「打开后最小化启动器」也在 Rust 侧做（前端不需要 window 权限）。
-- 移动：不建窗口，回 `mode = "embed"` 与 url，前端渲染 `#embed-layer`（一条顶栏 + 一个 `allowfullscreen` 的 iframe）。
+- 移动：不建窗口，回 `mode = "embed"` 与 url，前端渲染 `#embed-layer`（一个 `allowfullscreen` 的 iframe + 地址浮标）。
+
+内嵌层的地址浮标（`#embed-pill`）刻意做成**两步操作 + 可拖动**：它既是"当前连的是哪台服务器"的提示，
+又是全屏对局里唯一的返回入口，而早期版本"单击直接返回"在实测中极易被误触。
+
+| 交互 | 行为 |
+|---|---|
+| 折叠态 | 只显示地址，半透明（`opacity: .5`），不挡画面 |
+| 单击 | 展开成小卡片：地址 / 在线状态与延迟 / 操作提示 —— **不退出** |
+| 展开后再单击 | 返回启动器 |
+| 拖动 | 移动位置并记进 `localStorage`（纯界面偏好，不值得进配置结构）；位移 < 6px 仍算点击 |
+| 展开 / 旋转屏幕 | 自动夹回视口内（`applyPillPos`，避免拖到屏幕外找不回来） |
 
 ## 4. 架构与目录
 

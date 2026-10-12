@@ -525,30 +525,72 @@ button.icon {
   background: #05090c;
 }
 
-/* 退出浮标：半透明、靠安全区，平时几乎看不见，点/悬停才显形 */
-.embed-exit {
+/* 地址浮标：折叠时只显示地址；单击展开成小卡片，再点一下才返回启动器。可拖动，位置记忆。 */
+.embed-pill {
   position: absolute;
   top: max(10px, env(safe-area-inset-top));
   left: max(10px, env(safe-area-inset-left));
   z-index: 2;
-  max-width: 40vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(66vw, 340px);
   padding: 6px 12px;
-  font-size: 12px;
-  border-radius: 999px;
+  border-radius: 14px;
   border: 1px solid rgba(53, 208, 165, 0.35);
-  background: rgba(10, 14, 13, 0.72);
+  background: rgba(10, 14, 13, 0.78);
   color: var(--text);
-  opacity: 0.45;
-  transition: opacity 0.2s;
+  opacity: 0.5;
+  transition: opacity 0.2s, padding 0.15s;
+  /* 拖动时不要触发页面滚动/缩放手势 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
 }
 
-.embed-exit:hover,
-.embed-exit:focus,
-.embed-exit:active {
+.embed-pill:hover,
+.embed-pill:focus-visible {
+  opacity: 0.85;
+}
+
+.embed-pill.dragging {
   opacity: 1;
+  cursor: grabbing;
+  transition: none;
+}
+
+.embed-pill[data-expanded='true'] {
+  opacity: 1;
+  padding: 10px 14px;
+  border-color: var(--accent-dim);
+}
+
+.embed-pill-title {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 状态与提示只在展开时显示 */
+.embed-pill-meta,
+.embed-pill-hint {
+  display: none;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.embed-pill[data-expanded='true'] .embed-pill-meta,
+.embed-pill[data-expanded='true'] .embed-pill-hint {
+  display: block;
+}
+
+.embed-pill[data-expanded='true'] .embed-pill-hint {
+  color: var(--accent);
 }
 
 /* ---------- 窄屏（手机竖屏）：单栏 + 列表/详情两视图 ---------- */

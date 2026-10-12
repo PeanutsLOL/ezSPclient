@@ -1,6 +1,6 @@
 {
   "name": "ezspclient",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "《卫戍协议：盟约》多平台客户端 —— WebView 外壳 + 服务器地址簿",
   "license": "Unlicense",

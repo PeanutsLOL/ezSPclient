@@ -81,6 +81,9 @@ const STRINGS = {
     probeSummary: '测速完成：{0} 在线 / {1} 离线',
     backToLauncher: '返回启动器',
     back: '‹ 返回列表',
+    pillTapHint: '单击展开',
+    pillExitHint: '再次点击返回启动器',
+    pillDragHint: '可拖动',
     noTauri: '这个界面需要在 ezSPclient 窗口里打开。',
   },
   en: {
@@ -154,6 +157,9 @@ const STRINGS = {
     probeSummary: 'Done: {0} online / {1} offline',
     backToLauncher: 'Back to launcher',
     back: '‹ Servers',
+    pillTapHint: 'Tap to expand',
+    pillExitHint: 'Tap again to go back',
+    pillDragHint: 'drag to move',
     noTauri: 'This UI must run inside the ezSPclient window.',
   },
 };
@@ -477,7 +483,8 @@ async function connect(id) {
 
     if (target.mode === 'embed') {
       // 移动端没有多窗口：内嵌到当前界面，随时能退回来。
-      embedded = { id, name: server.name, url: target.url };
+      embedded = { id, name: server.name, address: displayAddress(server), url: target.url };
+      pill.expanded = false; // 每次进入都从折叠态开始
       renderEmbed();
       toast(t('gameOpened', server.name));
     } else {
@@ -492,6 +499,43 @@ async function connect(id) {
 // 移动端：游戏内嵌层
 // ---------------------------------------------------------------------------
 
+/** 浮标位置存在 localStorage：这是纯界面的偏好，不值得为它改配置结构。 */
+const PILL_POS_KEY = 'ezsp.embedPillPos';
+
+/** 浮标状态：`expanded` 单击切换（展开后再点就是返回启动器），`pos` 是拖动后的位置。 */
+const pill = { expanded: false, pos: readPillPos() };
+
+function readPillPos() {
+  try {
+    const pos = JSON.parse(localStorage.getItem(PILL_POS_KEY) || 'null');
+    return Number.isFinite(pos?.x) && Number.isFinite(pos?.y) ? pos : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePillPos(pos) {
+  try {
+    localStorage.setItem(PILL_POS_KEY, JSON.stringify(pos));
+  } catch {
+    /* 存不上就算了，下一次重新拖 */
+  }
+}
+
+/** 把浮标放到记忆的位置，并夹在视口内（展开/旋转屏幕后可能超出）。 */
+function applyPillPos(node) {
+  if (!pill.pos) return;
+  const rect = node.getBoundingClientRect();
+  const maxX = Math.max(0, window.innerWidth - rect.width);
+  const maxY = Math.max(0, window.innerHeight - rect.height);
+  const x = Math.round(Math.min(Math.max(0, pill.pos.x), maxX));
+  const y = Math.round(Math.min(Math.max(0, pill.pos.y), maxY));
+  node.style.left = `${x}px`;
+  node.style.top = `${y}px`;
+  node.style.right = 'auto';
+  node.style.bottom = 'auto';
+}
+
 /** 渲染 / 更新内嵌的游戏层（没有内嵌时移除它）。 */
 function renderEmbed() {
   const existing = $('embed-layer');
@@ -501,27 +545,127 @@ function renderEmbed() {
   }
 
   let layer = existing;
+  let node = existing?.querySelector('#embed-pill');
   if (!layer) {
     layer = document.createElement('div');
     layer.id = 'embed-layer';
-    // 只有一个小小的浮标：全屏下空间都留给游戏，浮标半透明不挡画面
+    // 只有一个小浮标：全屏下空间都留给游戏
     layer.innerHTML = `
       <iframe id="embed-frame" allow="fullscreen; autoplay; gamepad" allowfullscreen></iframe>
-      <button id="embed-exit" class="embed-exit"></button>`;
+      <div id="embed-pill" class="embed-pill" data-expanded="false" role="button" tabindex="0">
+        <span class="embed-pill-title"></span>
+        <span class="embed-pill-meta"></span>
+        <span class="embed-pill-hint"></span>
+      </div>`;
     document.body.appendChild(layer);
-    layer.querySelector('#embed-exit').addEventListener('click', exitEmbed);
+    node = layer.querySelector('#embed-pill');
+    wirePill(node);
   }
 
   const frame = layer.querySelector('#embed-frame');
   if (frame.getAttribute('src') !== embedded.url) frame.setAttribute('src', embedded.url);
-  const exit = layer.querySelector('#embed-exit');
-  exit.textContent = `‹ ${embedded.name}`;
-  exit.title = t('backToLauncher');
+
+  const server = findServer(embedded.id);
+  node.dataset.expanded = String(pill.expanded);
+  node.querySelector('.embed-pill-title').textContent = embedded.address;
+  node.querySelector('.embed-pill-meta').textContent =
+    server?.lastLatencyMs != null ? `${t('online')} · ${server.lastLatencyMs} ms` : t('unknown');
+  node.querySelector('.embed-pill-hint').textContent = `${t('pillExitHint')} · ${t('pillDragHint')}`;
+  node.title = pill.expanded ? t('pillExitHint') : t('pillTapHint');
+  applyPillPos(node);
+}
+
+/**
+ * 浮标交互：拖动移动位置（位置记忆），不拖动才算点击 —— 折叠时点击展开，
+ * 展开后点击才返回启动器（避免对局中误触直接退出）。
+ */
+function wirePill(node) {
+  const TAP_SLOP = 6; // 位移小于这个像素数仍视为点击
+  let active = false;
+  let moved = false;
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let originX = 0;
+  let originY = 0;
+
+  node.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const rect = node.getBoundingClientRect();
+    active = true;
+    moved = false;
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
+    originX = rect.left;
+    originY = rect.top;
+    node.classList.add('dragging');
+    try {
+      node.setPointerCapture(pointerId);
+    } catch {
+      /* 个别环境不支持，忽略 */
+    }
+    event.preventDefault();
+  });
+
+  node.addEventListener('pointermove', (event) => {
+    if (!active || event.pointerId !== pointerId) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!moved && Math.hypot(dx, dy) < TAP_SLOP) return;
+    moved = true;
+    pill.pos = { x: originX + dx, y: originY + dy };
+    applyPillPos(node);
+  });
+
+  const finish = (event, cancelled) => {
+    if (!active || event.pointerId !== pointerId) return;
+    active = false;
+    node.classList.remove('dragging');
+    try {
+      node.releasePointerCapture(pointerId);
+    } catch {
+      /* 忽略 */
+    }
+
+    if (moved) {
+      const rect = node.getBoundingClientRect();
+      pill.pos = { x: rect.left, y: rect.top };
+      savePillPos(pill.pos);
+      applyPillPos(node);
+      return;
+    }
+    if (cancelled) return;
+
+    if (!pill.expanded) {
+      pill.expanded = true;
+      renderEmbed();
+    } else {
+      exitEmbed();
+    }
+  };
+
+  node.addEventListener('pointerup', (event) => finish(event, false));
+  node.addEventListener('pointercancel', (event) => finish(event, true));
+  // 键盘可达（桌面调试时用）
+  node.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    if (!pill.expanded) {
+      pill.expanded = true;
+      renderEmbed();
+    } else {
+      exitEmbed();
+    }
+  });
+  // 屏幕旋转 / 窗口变化后重新夹住位置
+  window.addEventListener('resize', () => applyPillPos(node));
 }
 
 function exitEmbed() {
   if (!embedded) return;
   embedded = null;
+  pill.expanded = false;
   renderEmbed();
   render();
 }

@@ -55,18 +55,23 @@ fn open_game(...) -> Result<GameTarget, String>;   // GameTarget { mode: "window
 
 - 桌面：`WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))`，label 用 `game-<serverId>`，
   重复点击同一服务器就聚焦已有窗口；「打开后最小化启动器」也在 Rust 侧做（前端不需要 window 权限）。
-- 移动：不建窗口，回 `mode = "embed"` 与 url，前端渲染 `#embed-layer`（一个 `allowfullscreen` 的 iframe + 地址浮标）。
+- 移动：不建窗口，回 `mode = "embed"` 与 url，前端渲染 `#embed-layer`（一个 `allowfullscreen` 的 iframe + 地址浮球）。
 
-内嵌层的地址浮标（`#embed-pill`）刻意做成**两步操作 + 可拖动**：它既是"当前连的是哪台服务器"的提示，
-又是全屏对局里唯一的返回入口，而早期版本"单击直接返回"在实测中极易被误触。
+内嵌层的地址浮球（`#embed-pill`）做成**可贴边收起**：收起时就是一颗 40px 的圆球，永远吸在屏幕的
+**任意一条边**（左 / 右 / 上 / 下）上；单击在球旁边展开一张卡片，闲置 4 秒自动收起。它既是"当前连的是
+哪台服务器"的提示，又是全屏对局里唯一的返回入口 —— 所以退出做成卡片上明确的按钮，不靠点击球本身。
 
 | 交互 | 行为 |
 |---|---|
-| 折叠态 | 只显示地址，半透明（`opacity: .5`），不挡画面 |
-| 单击 | 展开成小卡片：地址 / 在线状态与延迟 / 操作提示 —— **不退出** |
-| 展开后再单击 | 返回启动器 |
-| 拖动 | 移动位置并记进 `localStorage`（纯界面偏好，不值得进配置结构）；位移 < 6px 仍算点击 |
-| 展开 / 旋转屏幕 | 自动夹回视口内（`applyPillPos`，避免拖到屏幕外找不回来） |
+| 收起态 | 40px 圆球贴在最近的边上，半透明、只显示应用图标与在线状态点（`online` / `offline` / `probing`）；贴住的那条边压平，看起来是被"吸"住的 |
+| 单击圆球 | 在球旁边展开卡片：地址 / 在线状态与延迟 / 「返回启动器」按钮 / 自动收起进度条 |
+| 再单击圆球 | 立即收起（不退出） |
+| 闲置 4 秒 | 自动收起；球继续贴在那条边上（`AUTO_DOCK_MS`） |
+| 拖动圆球 | 跟手移动，松手吸附到最近的边（`nearestDock`）并收起卡片；位移 < 6px 仍算点击 |
+| 旋转屏幕 / 改窗口大小 | 用 `dock` + `along` 重算坐标，始终在画面内；刘海 / 挖孔用 `env(safe-area-inset-*)` 的 1px 探针避开 |
+
+位置不存绝对坐标：只存"贴哪条边（`dock`）+ 沿边偏移（`along`）"，换尺寸也不会把球丢到屏幕外；
+0.2.2 及以前存的绝对坐标（`ezsp.embedPillPos`）会在第一次读取时迁移成最近的一条边。
 
 ## 4. 架构与目录
 
@@ -159,7 +164,7 @@ src-tauri/               Rust 后端
 - CSP：启动器页面限制为 `default-src 'self'`，但**必须额外放行 `frame-src http: https:`** —— 移动端要把游戏内嵌进启动器页面，
   否则会被 `ERR_BLOCKED_BY_CSP` 拦掉（桌面端走独立窗口，看不到这个问题）。
 - 移动端：整机锁 `sensorLandscape` + 沉浸式全屏（`WindowInsetsControllerCompat` 隐藏系统栏、下滑可临时唤出），
-  因为游戏是横屏的、需要占满整屏；内嵌层只留一个半透明浮标作为返回入口。
+  因为游戏是横屏的、需要占满整屏；内嵌层只留一颗贴边的浮球作为入口。
 - **明文 HTTP**：游戏走 http/ws（无证书），所以必须显式允许明文：Android 需要 `usesCleartextTraffic`/network-security-config，iOS 需要 ATS 例外，桌面无限制。这点在打包移动端时必须做，否则连接会静默失败。
 - 配置文件不含任何凭据（只有地址），可以放心导出分享。
 - 不采集任何遥测。

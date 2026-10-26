@@ -212,8 +212,40 @@ keyPassword=<你的密码>
 keystore 丢了就没法给同一个包名（`top.rakkasei.ezspclient`）发布更新，只能让用户卸载重装 —— 自己留好备份。
 
 **移动端窗口模型**：没有多窗口，`open_game` 返回 `mode = "embed"`，前端用全屏 iframe 内嵌游戏，
-顶部留一条「返回启动器」（Android 返回键 / ESC 也一样）。iframe 天然按域名隔离各服务器的存储，
-所以移动端不需要桌面那套 `isolateStorage` 配置。
+只留一颗贴边的浮球：点开卡片后按「返回启动器」（Android 返回键 / ESC 也能退）。iframe 天然按域名
+隔离各服务器的存储，所以移动端不需要桌面那套 `isolateStorage` 配置。
+
+### 真机 / 模拟器验证贴边浮球（没有游戏服务器也能测）
+
+浮球只在"内嵌游戏"时出现，所以需要一个设备能打开的页面。用 `adb reverse` 把设备的 3000 端口
+反向映射到开发机，再用自带的假服务器提供一个页面，就完全不依赖游戏本体：
+
+```powershell
+adb devices                                    # 真机走 USB 调试；MuMu 12 先 adb connect 127.0.0.1:16384
+adb reverse tcp:3000 tcp:3000
+python tools/fake-health-server.py --page      # /healthz 应答探活，/ 返回一个假游戏页面
+
+# 真机（arm64）
+pnpm android:build                             # 有 keystore.properties 时会签名
+adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+
+# 模拟器（MuMu 12 是 x86_64，按 ABI 打包；debug 包自带明文 HTTP 与可调试 WebView）
+pnpm tauri android build --debug --apk --target x86_64
+adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+
+在启动器里添加 `127.0.0.1`（不写端口，默认顺序会探到 3000）→「进入游戏」→ 横屏内嵌这一页。
+之后不用碰设备，直接用 adb 驱动浮球：
+
+```powershell
+adb shell input tap   <x> <y>                     # 点圆球：展开；展开时再点：收起
+adb shell input swipe <x1> <y1> <x2> <y2> 400     # 拖到某条边，松手吸附并收起
+adb shell screencap -p /sdcard/shot.png; adb pull /sdcard/shot.png shot.png
+```
+
+验收点：球停在离屏幕边缘 6px 处、四条边都能贴；展开后 4 秒不操作自动收起（卡片底部进度条走完）；
+卡片始终朝画面里展开、不越界；点卡片上的「返回启动器」回到地址簿。浮球位置记在
+`localStorage` 的 `ezsp.embedPillState`（只记"贴哪条边 + 沿边偏移"）。
 
 ### iOS
 

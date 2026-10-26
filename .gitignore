@@ -48,6 +48,7 @@ desktop.ini
 # 暂存与临时
 .tmp/
 tmp/
+*.devtools
 *.rs.bk
 *.pdb
 __pycache__/

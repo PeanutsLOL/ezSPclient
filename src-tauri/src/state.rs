@@ -64,6 +64,8 @@ pub struct Settings {
     pub isolate_storage: bool,
     /// 打开游戏后把启动器最小化。
     pub minimize_on_connect: bool,
+    /// 移动端：开启本地接管与渲染优化（限制 60Hz/DPR 1.5、拦截提速）
+    pub performance_acceleration: bool,
     /// 界面语言：zh / en。
     pub language: String,
 }
@@ -76,6 +78,7 @@ impl Default for Settings {
             game_fullscreen: true,
             isolate_storage: false,
             minimize_on_connect: true,
+            performance_acceleration: true,
             language: "zh".to_string(),
         }
     }

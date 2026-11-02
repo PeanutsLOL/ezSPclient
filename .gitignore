@@ -37,6 +37,7 @@ logs/
 *.log
 
 # 压力测试服务器（testserver/）的运行期产物
+testserver/upstream/
 testserver/*.log
 testserver/*.csv
 testserver/runtime/

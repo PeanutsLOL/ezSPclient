@@ -1,4 +1,4 @@
-# 采样「发热相关」指标：电池温度、CPU 最高/平均温度、进程累计 CPU 时间、当前界面。
+﻿# 采样「发热相关」指标：电池温度、CPU 最高/平均温度、进程累计 CPU 时间、当前界面。
 #
 #   powershell -File tools/sample-heat.ps1 -Seconds 180 -Out .tmp/heat-on.csv
 #

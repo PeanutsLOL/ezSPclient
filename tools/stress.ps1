@@ -1,4 +1,4 @@
-# 本地服务器压力测试：对「本机起的游戏服务器」做一次可复现的渲染/发热采样。
+﻿# 本地服务器压力测试：对「本机起的游戏服务器」做一次可复现的渲染/发热采样。
 #
 #   # 1) 先把本地游戏服务器跑起来（另开一个仓库：stronghold-protocol）
 #   #    cd D:\Git\Stronghold-Protocol; node server/index.js

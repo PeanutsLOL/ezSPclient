@@ -21,7 +21,8 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildPatchedWaves } from "./waves.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,7 +36,7 @@ function arg(name, fallback) {
 
 const PORT = Number(arg("port", 3000));
 const UPSTREAM = Number(arg("upstream", 3100));
-const GAME = path.resolve(arg("game", path.join(HERE, "..", "..", "Stronghold-Protocol")));
+const GAME = path.resolve(arg("game", path.join(HERE, "upstream")));
 const RECIPE_FILE = path.resolve(arg("recipe", path.join(HERE, "stress.json")));
 const DRY = process.argv.includes("--dry-run");
 
@@ -45,63 +46,14 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-// ---------------------------------------------------------------- 波次改写
+// ---------------------------------------------------------------- 波次改写（逻辑在 waves.mjs，供两处共用）
 
-function buildPatchedWaves() {
-  const waves = readJson(path.join(GAME, "data", "waves.json"));
-  const cfg = readJson(RECIPE_FILE);
-  const mode = cfg.mode || "mode_single_normal";
-  const rounds = Number(cfg.rounds || 6);
-  const recipe = cfg.recipe || {};
-  const overrides = cfg.overrides || {};
+const patched = buildPatchedWaves({ game: GAME, recipe: RECIPE_FILE });
 
-  const touched = [];
-  for (const [id, wave] of Object.entries(waves)) {
-    const use = (wave.usedBy || []).find((u) => u.modeId === mode && u.round <= rounds);
-    if (!use) continue;
-
-    const r = { ...recipe, ...(overrides[String(use.round)] || {}) };
-    const perWave = Math.max(1, Number(r.spawnsPerWave || 1));
-    const count = Math.max(1, Number(r.count || 10));
-    const interval = Number(r.interval ?? 1.5);
-    const start = Number(r.time ?? 1);
-    const routeIndex = Number(r.routeIndex ?? 0);
-
-    // 沿用原波次第一条 spawn 的 key/slot/motion 字段，保证枚举值合法
-    const template = (wave.spawns && wave.spawns[0]) || {};
-    const spawns = [];
-    for (let i = 0; i < perWave; i++) {
-      spawns.push({
-        ...template,
-        time: Number((start + i * interval).toFixed(2)),
-        count,
-        interval,
-        routeIndex: Math.min(routeIndex, Math.max(0, (wave.routes || []).length - 1)),
-      });
-    }
-
-    const total = spawns.reduce((n, s) => n + s.count, 0);
-    const slotCounts = {};
-    for (const s of spawns) {
-      const slot = s.slot || "N";
-      slotCounts[slot] = (slotCounts[slot] || 0) + s.count;
-    }
-
-    wave.spawns = spawns;
-    wave.totalCount = total;
-    wave.slotCounts = slotCounts;
-    touched.push({ id, round: use.round, total, templateKey: template.key, slot: template.slot || "N" });
-  }
-
-  touched.sort((a, b) => a.round - b.round);
-  return { mode, rounds, waves, touched, json: JSON.stringify(waves) };
-}
-
-const patched = buildPatchedWaves();
 log(`游戏目录 ${GAME}`);
 log(`配方 ${RECIPE_FILE} → mode=${patched.mode} rounds=${patched.rounds}`);
 for (const t of patched.touched) {
-  log(`  第 ${t.round} 轮  ${t.id}  ${t.total} 只（${t.templateKey}, slot ${t.slot}）`);
+  log(`  第 ${t.round} 轮  ${t.id}  ${t.total} 只（${t.enemy}）`);
 }
 if (!patched.touched.length) {
   log("警告：没有匹配到任何波次，检查配方里的 mode / rounds 是否与 data/waves.json 的 usedBy 对得上");
@@ -116,7 +68,15 @@ if (DRY) {
 
 const child = spawn(process.execPath, [path.join(GAME, "server", "index.js")], {
   cwd: GAME,
-  env: { ...process.env, PORT: String(UPSTREAM), HOST: "127.0.0.1" },
+  env: {
+    ...process.env,
+    PORT: String(UPSTREAM),
+    HOST: "127.0.0.1",
+    // 关键：让上游在启动前就把 data/waves.json 的读取替换掉（不改游戏仓库里的文件）
+    STRESS_GAME: GAME,
+    STRESS_RECIPE: RECIPE_FILE,
+    NODE_OPTIONS: `--import ${pathToFileURL(path.join(HERE, "patch-waves.mjs")).href}`,
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
 child.stdout.on("data", (b) => process.stdout.write(`[game] ${b}`));

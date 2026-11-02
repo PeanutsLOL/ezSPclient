@@ -17,16 +17,25 @@ pixi/spine 的绝对耗时反而更高，说明两次采样根本不在同一场
 
 ## 一次性准备
 
-**推荐用仓库自带的压力服务器**（[testserver/](../testserver/README.md)）：它把游戏服务器原样拉起，
-并只替换 `/data/waves.json` —— 每轮敌人数量/节奏固定可调，游戏仓库不用改一个字节。
+**推荐用仓库自带的压力服务器**（[testserver/](../testserver/README.md)）：它会从 GitHub
+克隆一份干净的上游服务器到 `testserver/upstream/`（gitignore），把 `data/waves.json`
+在服务端换成本仓库的配方，再套一层代理对外提供 —— 游戏代码一个字节都不改。
 
 ```powershell
-# 1) 起压力服务器（3000 对外，上游 3100）
+# 1) 克隆 + 装依赖 + 备素材（美术覆盖率低于 95% 会直接报错，防止拿占位图测性能）
+powershell -File testserver/setup.ps1
+powershell -File testserver/setup.ps1 -Assets download     # 素材不全时：从社区 dump 拉全量
+
+# 2) 起压力服务器（3000 对外，上游 3100）
 node testserver/server.mjs
 #    自检：
 #    curl http://127.0.0.1:3000/healthz
 #    curl http://127.0.0.1:3000/__stress/info
 ```
+
+⚠️ **不要用 `-lite` 包**：它没有美术，跑起来全是占位图，渲染负载完全不对。
+本仓库的做法是 `setup.ps1` 的素材模式（`copy` / `download` / `extract`），并用
+[asset-coverage.py](../testserver/asset-coverage.py) 按类别校验覆盖率。
 
 也可以直接用游戏仓库自己的服务器（没有波次控制，内容随机）：
 
@@ -75,7 +84,8 @@ powershell -File tools/stress.ps1 -Serial 127.0.0.1:16384 -Label emu-on -Seconds
 
 ## 已知的确定性边界
 
-- 用 `testserver/` 时：每轮敌人类型/数量/节奏由 `testserver/stress.json` 写死，**跨运行完全一致**；
+- 用 `testserver/` 时：每轮敌人类型/数量/节奏由 `testserver/stress.json` 写死，**跨运行完全一致**
+  （默认 AC-1 的 9 轮全改：前 8 轮各 20 只、第 9 轮 32 只）；
 - 用原始游戏服务器时：同一难度同一张图每波构成一致，但玩家操作（买什么、放哪）会改变同屏单位数；
   所以脚本只点「准备就绪」不碰商店，两次运行仍可能有少量差异；
 - 两种方式都不会改变**引擎/地图/敌人属性**：改的只是「每轮来多少、什么节奏」。

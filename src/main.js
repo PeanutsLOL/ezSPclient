@@ -37,6 +37,13 @@ const STRINGS = {
     setMinimize: '打开游戏后最小化启动器',
     setAcceleration: '开启本地接管与渲染提速（实验性）',
     setAccelerationHint: '启用 60Hz 功耗锁、DPR 优化与核心战斗仿真本地拦截；关闭时完全走远端原始逻辑。',
+    setRenderScale: '渲染倍率上限',
+    setRenderScaleHint: '钳制游戏的 devicePixelRatio：倍率越低越省电（1.0 的像素量约为 1.5 的 44%），文字也会变软。改完重启应用生效。',
+    scaleOff: '不限制（跟随设备）',
+    scale1: '1.0×（最省电）',
+    scale125: '1.25×',
+    scale15: '1.5×（默认）',
+    scale2: '2.0×（最清晰）',
     addTitle: '添加服务器',
     editTitle: '编辑服务器',
     exportTitle: '导出地址簿',
@@ -115,6 +122,13 @@ const STRINGS = {
     setMinimize: 'Minimize the launcher after opening the game',
     setAcceleration: 'Enable local takeover & render acceleration',
     setAccelerationHint: 'Locks 60Hz display, optimizes DPR and intercepts battle simulation locally; disable to use remote untouched scripts.',
+    setRenderScale: 'Render scale cap',
+    setRenderScaleHint: 'Caps the game devicePixelRatio: lower is cooler (1.0 draws ~44% of the pixels of 1.5) but softer text. Takes effect after restart.',
+    scaleOff: 'Uncapped (follow device)',
+    scale1: '1.0× (coolest)',
+    scale125: '1.25×',
+    scale15: '1.5× (default)',
+    scale2: '2.0× (sharpest)',
     addTitle: 'Add server',
     editTitle: 'Edit server',
     exportTitle: 'Export address book',
@@ -1084,6 +1098,7 @@ function openSettings() {
   $('s-isolate').checked = !!(settings && settings.isolateStorage);
   $('s-minimize').checked = !!(settings && settings.minimizeOnConnect);
   $('s-acceleration').checked = settings && settings.performanceAcceleration !== undefined ? !!settings.performanceAcceleration : true;
+  $('s-render-scale').value = (settings && settings.renderScale) || '1.5';
   openModal('settings-modal');
 }
 
@@ -1101,6 +1116,7 @@ async function submitSettings(event) {
     isolateStorage: $('s-isolate').checked,
     minimizeOnConnect: $('s-minimize').checked,
     performanceAcceleration: $('s-acceleration').checked,
+    renderScale: $('s-render-scale').value || '1.5',
     language: lang,
   };
 

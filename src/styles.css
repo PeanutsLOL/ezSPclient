@@ -308,7 +308,8 @@ body {
 }
 
 input,
-textarea {
+textarea,
+select {
   background: #0b100f;
   border: 1px solid var(--line);
   color: var(--text);
@@ -319,7 +320,8 @@ textarea {
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--accent-dim);
 }

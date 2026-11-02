@@ -151,7 +151,8 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
         raise SystemExit(f"在 {activity_path.name} 里找不到 `{class_anchor}`，模板可能变了")
     text = text.replace(
         class_anchor,
-        class_anchor + "\n  companion object {\n    @Volatile\n    var isAccelerationEnabled: Boolean = true\n  }\n\n  private var webViewInstance: WebView? = null",
+        class_anchor
+        + "\n  companion object {\n    @Volatile\n    var isAccelerationEnabled: Boolean = true\n\n    @Volatile\n    var renderScale: String = \"1.5\"\n  }\n\n  private var webViewInstance: WebView? = null",
         1,
     )
 
@@ -169,11 +170,15 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
         "\n"
         "  fun updateAccelerationState() {\n"
         "    try {\n"
-        "      val file = File(filesDir, \"settings.json\")\n"
+        "      // Tauri 在 Android 上把配置写在 dataDir 根目录（不是 filesDir）\n"
+        "      val file = File(dataDir, \"settings.json\")\n"
         "      if (file.exists()) {\n"
         "        val json = JSONObject(file.readText())\n"
         "        if (json.has(\"performanceAcceleration\")) {\n"
         "          isAccelerationEnabled = json.getBoolean(\"performanceAcceleration\")\n"
+        "        }\n"
+        "        if (json.has(\"renderScale\")) {\n"
+        "          renderScale = json.getString(\"renderScale\")\n"
         "        }\n"
         "      }\n"
         "    } catch (_: Exception) {}\n"
@@ -192,12 +197,27 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
         "    if (isAccelerationEnabled && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {\n"
         "      val optimizerScript = \"\"\"\n"
         "        (function() {\n"
-        "          try {\n"
-        "            Object.defineProperty(window, 'devicePixelRatio', {\n"
-        "              get: function() { return 1.5; },\n"
-        "              configurable: true\n"
-        "            });\n"
-        "          } catch (_) {}\n"
+        "          var scale = '__SCALE__';\n"
+        "          if (scale && scale !== 'off') {\n"
+        "            var v = parseFloat(scale);\n"
+        "            if (v > 0) {\n"
+        "              try {\n"
+        "                Object.defineProperty(window, 'devicePixelRatio', {\n"
+        "                  get: function() { return v; },\n"
+        "                  configurable: true\n"
+        "                });\n"
+        "              } catch (_) {}\n"
+        "              if (v <= 1.0) {\n"
+        "                try {\n"
+        "                  var K = 'sp.pref.settings';\n"
+        "                  var raw = localStorage.getItem(K);\n"
+        "                  var c = raw ? JSON.parse(raw) : null;\n"
+        "                  if (!c || typeof c !== 'object') c = {};\n"
+        "                  if (c.quality === undefined) { c.quality = 'low'; localStorage.setItem(K, JSON.stringify(c)); }\n"
+        "                } catch (_) {}\n"
+        "              }\n"
+        "            }\n"
+        "          }\n"
         "          try {\n"
         "            var rawRAF = window.requestAnimationFrame;\n"
         "            if (rawRAF) {\n"
@@ -216,7 +236,7 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
         "            }\n"
         "          } catch (_) {}\n"
         "        })();\n"
-        "      \"\"\".trimIndent()\n"
+        "      \"\"\".trimIndent().replace(\"__SCALE__\", renderScale)\n"
         "      WebViewCompat.addDocumentStartJavaScript(webView, optimizerScript, setOf(\"*\"))\n"
         "    }\n"
         "  }\n"
@@ -307,29 +327,67 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
     return True
 
 
-def patch_webview_client(client_path: pathlib.Path) -> bool:
-    """第二步本地劫持与加速：拦截 simWorker.js 以及高频静态大资源。"""
-    if not client_path.is_file():
-        return False
-    text = client_path.read_text(encoding="utf-8")
-    if INTERCEPT_MARKER in text:
-        return False
+def run_client_patch() -> bool:
+    """调用 patch-client.py：`generated/*.kt` 每次构建都会被重写，补丁单独一个脚本。"""
+    import subprocess
 
-    anchor = "        lastInterceptedUrl = request.url\n"
-    if anchor not in text:
-        raise SystemExit(f"在 {client_path.name} 里找不到 lastInterceptedUrl 锚点，模板可能变了")
-
-    patch = (
-        "        lastInterceptedUrl = request.url\n\n"
-        f"        // {INTERCEPT_MARKER}\n"
-        "        if (MainActivity.isAccelerationEnabled) {\n"
-        "            val intercepted = LocalInterceptor.intercept(view.context, request)\n"
-        "            if (intercepted != null) return intercepted\n"
-        "        }\n"
-    )
-    text = text.replace(anchor, patch, 1)
-    client_path.write_text(text, encoding="utf-8")
+    script = ROOT / "tools" / "patch-client.py"
+    if not script.is_file():
+        return False
+    done = subprocess.run([sys.executable, str(script)], cwd=str(ROOT), capture_output=True, text=True)
+    if done.returncode != 0:
+        print(done.stderr.strip(), file=sys.stderr)
+        return False
+    print(done.stdout.strip())
     return True
+
+
+GRADLE_HOOK_MARKER = "[ezSPclient] 编译前补回本地拦截"
+GRADLE_HOOK = f"""
+
+// {GRADLE_HOOK_MARKER}
+// `tauri android build` 每次都会重新生成 generated/*.kt，把「第二步本地拦截」补丁冲掉；
+// 这里注册一个「永远执行」的任务，在 Kotlin 编译前再打一遍（脚本幂等）。
+// 注意用文件顶部 import 的 File，不要写 java.io.File —— 会被解析成 Gradle 的 Project.java 扩展。
+tasks.register("ezspPatchClient") {{
+    val repoRoot = run {{
+        var dir: File? = rootDir.canonicalFile
+        while (dir != null && !File(dir, "tools/patch-client.py").isFile) dir = dir.parentFile
+        dir?.absolutePath ?: ""
+    }}
+    doLast {{
+        if (repoRoot.isEmpty()) return@doLast
+        val script = File(repoRoot, "tools/patch-client.py")
+        if (!script.isFile) return@doLast
+        try {{
+            val proc = ProcessBuilder("python", script.absolutePath)
+                .directory(File(repoRoot))
+                .redirectErrorStream(true)
+                .start()
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            if (out.isNotEmpty()) println(out)
+        }} catch (e: Exception) {{
+            println("[ezSPclient] 拦截补丁失败：${{e.message}}")
+        }}
+    }}
+}}
+
+tasks.matching {{ it.name.startsWith("compile") && it.name.endsWith("Kotlin") }}.configureEach {{
+    dependsOn("ezspPatchClient")
+}}
+"""
+
+
+def patch_gradle_hook(text: str) -> str:
+    """在 app/build.gradle.kts 末尾挂上「编译前重新打补丁」的任务。"""
+    if GRADLE_HOOK_MARKER in text:
+        return text
+    if "import java.io.File" not in text:
+        anchor = "import java.util.Properties"
+        if anchor in text:
+            text = text.replace(anchor, "import java.io.File\n" + anchor, 1)
+    return text.rstrip() + GRADLE_HOOK
 
 
 def main() -> int:
@@ -344,30 +402,34 @@ def main() -> int:
     gradle_text = GRADLE.read_text(encoding="utf-8")
     manifest_text = MANIFEST.read_text(encoding="utf-8")
     activity = find_main_activity()
+    client_script = ROOT / "tools" / "patch-client.py"
+    client_patched = CLIENT_FILE.is_file() and INTERCEPT_MARKER in CLIENT_FILE.read_text(encoding="utf-8")
 
     todo = []
     if "usesCleartextTraffic" not in release_block(gradle_text):
         todo.append("release 明文 HTTP")
     if KEYSTORE_PROPS.is_file() and "signingConfig" not in release_block(gradle_text):
         todo.append("release 签名配置")
+    if GRADLE_HOOK_MARKER not in gradle_text:
+        todo.append("编译前补丁钩子")
     if "screenOrientation" not in manifest_text:
         todo.append("锁横屏（sensorLandscape）")
     if activity and IMMERSIVE_MARKER not in activity.read_text(encoding="utf-8"):
         todo.append("沉浸式全屏")
-    if CLIENT_FILE.is_file() and INTERCEPT_MARKER not in CLIENT_FILE.read_text(encoding="utf-8"):
+    if client_script.is_file() and not client_patched:
         todo.append("第二步本地拦截加速")
 
-    if not todo:
+    if args.check:
+        if todo:
+            print(f"缺少补丁（{'、'.join(todo)}）", file=sys.stderr)
+            return 1
         print(f"补丁已就位：{GRADLE.relative_to(ROOT)}、{MANIFEST.relative_to(ROOT)}")
         return 0
-
-    if args.check:
-        print(f"缺少补丁（{'、'.join(todo)}）", file=sys.stderr)
-        return 1
 
     gradle_text = patch_cleartext(gradle_text)
     if KEYSTORE_PROPS.is_file():
         gradle_text = patch_signing(gradle_text)
+    gradle_text = patch_gradle_hook(gradle_text)
     GRADLE.write_text(gradle_text, encoding="utf-8")
 
     MANIFEST.write_text(patch_orientation(manifest_text), encoding="utf-8")
@@ -375,10 +437,12 @@ def main() -> int:
     if activity:
         patch_immersive(activity)
 
-    if CLIENT_FILE.is_file():
-        patch_webview_client(CLIENT_FILE)
+    run_client_patch()
 
-    print(f"已打补丁（{'、'.join(todo)}）")
+    if todo:
+        print(f"已打补丁（{'、'.join(todo)}）")
+    else:
+        print(f"补丁已就位：{GRADLE.relative_to(ROOT)}、{MANIFEST.relative_to(ROOT)}")
     if not KEYSTORE_PROPS.is_file():
         print(f"提示：没有 {KEYSTORE_PROPS.relative_to(ROOT)}，release 包不会签名（只能装 debug 包）")
     return 0

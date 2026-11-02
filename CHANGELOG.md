@@ -17,6 +17,23 @@
   - 开启时硬件级锁定 60Hz 屏幕刷新率（`preferredDisplayMode=3`），降低显示功耗
   - DocumentStart 特权脚本注入：锁定 `devicePixelRatio = 1.5` 与 60 FPS 帧率上限，彻底减轻 2.8K 屏幕下的顶点批处理与光栅化过载
   - 原生层 `shouldInterceptRequest` 劫持 `simWorker.js`，改为线性队列调度，消除 Promise 链堆积与 GC 顿挫；静态大资源本地持久化缓存
+- **渲染倍率可调（本轮新增）**：设置弹窗新增「渲染倍率上限」（不限制 / 1.0× / 1.25× / 1.5× / 2.0×，默认 1.5×），
+  直接钳制游戏的 `devicePixelRatio`；倍率 ≤ 1.0 时还会把游戏画面质量默认设为「低」（关掉 MSAA 与阴影）。
+  实测（MuMu 模拟器 / 成对 canvas）：1.5× → 1.0× 后 Pixi 与 Three 的画布由 `1647×927` 降到 `1098×618`，
+  像素量降到 **44%**；同一场景下 Pixi/Three/Spine 的每秒 JS 耗时分别下降约 13%/12%/23%，GC 时间降到原来的 1/6
+- **修复：本地接管设置项一直没生效**：`MainActivity` 读的是 `filesDir/settings.json`，而 Tauri 在 Android 上把配置写在
+  `dataDir` 根目录，导致「本地接管」与「渲染倍率」两个开关读到的永远是默认值。改读 `dataDir` 后实测
+  `devicePixelRatio` 随设置从 1.5 变为 1.0、游戏侧 `sp.pref.settings.quality` 变为 `low`
+- **修复：`generated/*.kt` 每次构建被重写导致本地拦截补丁静默丢失**：`tauri android build` 会在编译前重新生成
+  `gen/android/.../generated/RustWebViewClient.kt`，之前「打补丁 → 构建」的顺序等于没打（已确认旧包 dex 里没有拦截代码）。
+  现在补丁拆到 `tools/patch-client.py`，并由 `app/build.gradle.kts` 里的 `ezspPatchClient` 任务在 Kotlin 编译前重打；
+  实测新包 dex 含拦截实现，真机/模拟器上 `fetch('/js/battle/simWorker.js')` 返回的是优化版（含 `Local Interceptor` 标记）
+
+### 工具
+
+- 新增 `tools/cdp.mjs`：本机 WebView2 / Android WebView 的 CDP 客户端（`list` / `eval` / `contexts` / `nav` / `logs` / `profile` / `metrics`）
+- 新增 `tools/prof.mjs`：解析 `.cpuprofile`，输出自耗时排行与按文件归类（含 idle / GC / program 占比）
+- 新增 `tools/patch-client.py`：单独给 `generated/RustWebViewClient.kt` 打本地拦截补丁（幂等，构建期由 Gradle 调用）
 
 ### 变更
 

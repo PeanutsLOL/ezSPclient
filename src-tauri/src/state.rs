@@ -66,6 +66,8 @@ pub struct Settings {
     pub minimize_on_connect: bool,
     /// 移动端：开启本地接管与渲染优化（限制 60Hz/DPR 1.5、拦截提速）
     pub performance_acceleration: bool,
+    /// 渲染倍率上限：off / 1 / 1.25 / 1.5 / 2（钳制 devicePixelRatio，越小越省电）
+    pub render_scale: String,
     /// 界面语言：zh / en。
     pub language: String,
 }
@@ -79,6 +81,7 @@ impl Default for Settings {
             isolate_storage: false,
             minimize_on_connect: true,
             performance_acceleration: true,
+            render_scale: "1.5".to_string(),
             language: "zh".to_string(),
         }
     }

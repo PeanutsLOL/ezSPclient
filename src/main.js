@@ -712,6 +712,8 @@ function renderEmbed() {
       if (frame) frame.src = 'about:blank';
       existing.remove();
     }
+    // 回到启动器：把被隐藏的启动器 DOM 放回布局
+    document.body.classList.remove('is-embedded');
     return;
   }
 
@@ -739,8 +741,13 @@ function renderEmbed() {
         <span class="embed-pill-dot"></span>
       </div>`;
     document.body.appendChild(layer);
+    // 内嵌时把启动器自己的界面从布局里摘掉：它和游戏跑在同一个渲染进程/同一根主线程上，
+    // 留着只会继续参与样式解析、布局与合成（还不会因被不透明层盖住就完全免掉层的维护）。
+    document.body.classList.add('is-embedded');
     wirePill(layer.querySelector('#embed-pill'));
     wireCard(layer.querySelector('#embed-card'));
+  } else {
+    document.body.classList.add('is-embedded');
   }
 
   const frame = layer.querySelector('#embed-frame');

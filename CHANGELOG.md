@@ -60,6 +60,9 @@
 - **帧率自适应降档**：注入的 rAF 节流器统计帧间隔 EMA，连续 150 帧仍慢于 20 ms（≈<50 fps）时把上限从 60 压到 30，
   只降不升避免抖动。跑得动的设备完全不变；跑不动的设备少排一半无效帧。实测注入已生效
   （`requestAnimationFrame.toString()` 含该逻辑），这台模拟器场景下 EMA 未越阈值故未触发
+- **内嵌时摘掉启动器界面**：游戏 iframe 与启动器共享同一个渲染进程与主线程，内嵌后给 `body` 加
+  `is-embedded`，把 `.topbar / .layout / .statusbar` 设为 `display:none`。实测内嵌时
+  `getComputedStyle('.layout').display === 'none'`，退出后恢复 `grid`、`#embed-layer` 已移除
 
 ### 工具
 

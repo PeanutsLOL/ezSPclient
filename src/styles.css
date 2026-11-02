@@ -515,6 +515,17 @@ button.icon {
 
 /* ---------- 移动端：游戏内嵌层 ---------- */
 
+/*
+ * 内嵌游戏时启动器自己的界面不参与布局与绘制。
+ * 游戏 iframe 和启动器共享同一个渲染进程与主线程，留着这些节点仍要参与样式、布局与合成的维护，
+ * 摘掉后主线程只剩游戏本身和那颗浮球。
+ */
+body.is-embedded > .topbar,
+body.is-embedded > .layout,
+body.is-embedded > .statusbar {
+  display: none;
+}
+
 #embed-layer {
   position: fixed;
   top: 0;

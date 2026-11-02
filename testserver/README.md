@@ -26,7 +26,28 @@ powershell -File testserver/setup.ps1 -Ref v0.3.3           # 固定到某个 ta
 powershell -File testserver/setup.ps1 -Recreate             # 删掉重来
 ```
 
-### 素材：`-lite` 包不能用来测性能
+### 素材：两套清单，缺一不可
+
+游戏有**两份**素材清单，作用完全不同：
+
+| 清单 | 内容 | 缺失后果 |
+|---|---|---|
+| `data/assets.json` | 社区 dump 的贴图/Spine/音频（`/assets/...`） | 大部分图变成占位符 |
+| `data/local-assets.json` | 从**官方客户端**提取的本地素材（`/assets/local/...`，1598 项） | 官方本地美术不启用，**3D 棋盘也不会加载**（`docs/ASSETS.md:76`） |
+
+`setup.ps1` 会同时处理两者：
+
+```powershell
+# 社区 dump 侧（copy/link/download/extract 见下）
+# 官方本地包侧：默认自动找本机已装好的目录，或显式指定
+powershell -File testserver/setup.ps1 -LocalPack "D:\Games\ArknightsPacked"
+```
+
+> 只拷 `public/assets/local/` 里的文件而**没有** `data/local-assets.json`，等于白拷 ——
+> 客户端不认，3D 棋盘退回 2D/缺失。这个坑踩过一次，现在 [asset-coverage.py](asset-coverage.py)
+> 会把 `local/official` 单列一行，缺失时直接打印警告。
+
+### `-lite` 包不能用来测性能
 
 上游 release 有三种包，**只有完整包带美术**：
 

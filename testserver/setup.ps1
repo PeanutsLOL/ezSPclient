@@ -14,6 +14,7 @@ param(
   [ValidateSet("link", "copy", "download", "extract", "none")]
   [string]$Assets = "copy",
   [string]$AssetsFrom = "",
+  [string]$LocalPack = "",
   [string]$Repo = "https://github.com/sganggs/Stronghold-Protocol.git",
   [switch]$Recreate
 )
@@ -124,6 +125,34 @@ if ($Assets -eq "download" -or $Assets -eq "extract") {
     } finally {
       Pop-Location
     }
+  }
+}
+
+Write-Host "[3.2/4] 官方本地素材包（local-assets.json）..."
+if ($Assets -eq "none") {
+  Write-Host "      跳过（-Assets none）"
+} else {
+  $packSrc = $LocalPack
+  if (-not $packSrc) {
+    foreach ($cand in @($AssetsFrom, "D:\Git\Stronghold-Protocol", (Join-Path $here "..\..\Stronghold-Protocol"))) {
+      if ($cand -and (Test-Path (Join-Path $cand "data\local-assets.json"))) { $packSrc = $cand; break }
+    }
+  }
+  if (-not $packSrc -or -not (Test-Path (Join-Path $packSrc "data\local-assets.json"))) {
+    Write-Host "      没有找到 local-assets.json：3D 棋盘与官方本地美术不会启用"
+    Write-Host "      有解包好的官方客户端就运行 tools/local-extract/extract.py，或用 -LocalPack <已有素材目录>"
+  } else {
+    $manifestSrc = Join-Path $packSrc "data\local-assets.json"
+    $manifestDst = Join-Path $target "data\local-assets.json"
+    Copy-Item $manifestSrc $manifestDst -Force
+    $localSrc = Join-Path $packSrc "public\assets\local"
+    $localDst = Join-Path $target "public\assets\local"
+    if (Test-Path $localSrc) {
+      robocopy $localSrc $localDst /E /XC /XN /XO /NFL /NDL /NJH /NJS /NP | Out-Null
+      if ($LASTEXITCODE -ge 8) { throw "robocopy local 失败（exit=$LASTEXITCODE）" }
+    }
+    $cnt = (Get-Content $manifestDst -Raw | ConvertFrom-Json).count
+    Write-Host "      已启用：manifest count=$cnt，文件来自 $packSrc"
   }
 }
 

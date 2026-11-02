@@ -130,6 +130,8 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
         return False
 
     imports = (
+        "import android.app.ActivityManager\n"
+        "import android.content.Context\n"
         "import android.os.Build\n"
         "import android.webkit.WebView\n"
         "import androidx.activity.OnBackPressedCallback\n"
@@ -152,7 +154,7 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
     text = text.replace(
         class_anchor,
         class_anchor
-        + "\n  companion object {\n    @Volatile\n    var isAccelerationEnabled: Boolean = true\n\n    @Volatile\n    var renderScale: String = \"1.5\"\n  }\n\n  private var webViewInstance: WebView? = null",
+        + "\n  companion object {\n    @Volatile\n    var isAccelerationEnabled: Boolean = true\n\n    @Volatile\n    var renderScale: String = \"auto\"\n  }\n\n  private var webViewInstance: WebView? = null",
         1,
     )
 
@@ -184,10 +186,36 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
         "    } catch (_: Exception) {}\n"
         "  }\n"
         "\n"
+        "  /**\n"
+        "   * 把设置里的 \"auto\" 解析成具体倍率：低端机（低内存 / 小核数）落到 1.0，其余 1.5。\n"
+        "   * 高配机上 auto 与 1.5 完全等价，等于不改变观感。\n"
+        "   */\n"
+        "  private fun resolveRenderScale(): String {\n"
+        "    val raw = renderScale\n"
+        "    if (raw != \"auto\") return raw\n"
+        "    return try {\n"
+        "      val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager\n"
+        "      val info = ActivityManager.MemoryInfo()\n"
+        "      am.getMemoryInfo(info)\n"
+        "      val cores = Runtime.getRuntime().availableProcessors()\n"
+        "      val lowRam = am.isLowRamDevice || info.totalMem in 1..(4L * 1024 * 1024 * 1024)\n"
+        "      val picked = if (lowRam || cores <= 4) \"1\" else \"1.5\"\n"
+        "      android.util.Log.i(\n"
+        "        \"ezSPclient\",\n"
+        "        \"renderScale auto -> \" + picked + \" (cores=\" + cores + \", ramMB=\" + (info.totalMem / 1024 / 1024) + \", lowRam=\" + lowRam + \")\",\n"
+        "      )\n"
+        "      picked\n"
+        "    } catch (_: Exception) {\n"
+        "      \"1.5\"\n"
+        "    }\n"
+        "  }\n"
+        "\n"
         "  override fun onWebViewCreate(webView: WebView) {\n"
         "    super.onWebViewCreate(webView)\n"
         "    webViewInstance = webView\n"
         "    updateAccelerationState()\n"
+        "    // 只有非计量网络才做资源预热（避免蜂窝下和 WebView 重复拉一份）\n"
+        "    LocalInterceptor.setPrefetchAllowed(LocalInterceptor.detectPrefetchAllowed(this))\n"
         "    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {\n"
         "      WebView.setWebContentsDebuggingEnabled(true)\n"
         "    }\n"
@@ -236,7 +264,7 @@ def patch_immersive(activity_path: pathlib.Path) -> bool:
         "            }\n"
         "          } catch (_) {}\n"
         "        })();\n"
-        "      \"\"\".trimIndent().replace(\"__SCALE__\", renderScale)\n"
+        "      \"\"\".trimIndent().replace(\"__SCALE__\", resolveRenderScale())\n"
         "      WebViewCompat.addDocumentStartJavaScript(webView, optimizerScript, setOf(\"*\"))\n"
         "    }\n"
         "  }\n"

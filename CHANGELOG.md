@@ -29,6 +29,21 @@
   现在补丁拆到 `tools/patch-client.py`，并由 `app/build.gradle.kts` 里的 `ezspPatchClient` 任务在 Kotlin 编译前重打；
   实测新包 dex 含拦截实现，真机/模拟器上 `fetch('/js/battle/simWorker.js')` 返回的是优化版（含 `Local Interceptor` 标记）
 
+### 迭代二（渲染倍率自适应与缓存治理）
+
+- **渲染倍率新增「自动」档（新默认）**：按设备内存与核心数选倍率 —— `isLowRamDevice` / 总内存 ≤ 4 GB / 核心数 ≤ 4 时用 1.0×，
+  其余 1.5×。高配机与原来的 1.5× 完全等价（观感不变），低端机自动省一半像素。实测模拟器（4 核 / 3939 MB / lowRam）
+  日志为 `renderScale auto -> 1`，`devicePixelRatio` 生效为 1
+- **本地资源缓存治理**：缓存上限 256 MB、超限按最后修改时间淘汰；缓存文件名改为「双路 hash + 原扩展名」，
+  避免长 URL 截断后互相覆盖；只缓存二进制资源（字体/贴图/音频/Spine），**js/css/json 一律不缓存**，
+  保证游戏更新后能拿到新代码
+- **修复：计量网络下重复下载**：原来每次缓存未命中都会在后台为同一 URL 再拉一份，和 WebView 自身的下载重复。
+  现在只在非计量网络（`NET_CAPABILITY_NOT_METERED`）才预热，蜂窝网络下不再产生双倍流量
+- **修复：拦截器实现只存在于可再生的 `gen/` 里**：`LocalInterceptor.kt` 之前只写在 `src-tauri/gen/`（被 gitignore），
+  新克隆仓库跑 `android:init` 会因为 `MainActivity` 引用不到它而编译失败。现在源码放在 `tools/android/LocalInterceptor.kt`，
+  由 `patch-client.py` 在每次构建前复制进生成工程，`gen/` 保持“随时可删可重建”
+- 诊断：`LocalInterceptor` 在 logcat（tag `ezSPclient`）打印倍率决策与缓存命中/未命中（限前 20 条）
+
 ### 工具
 
 - 新增 `tools/cdp.mjs`：本机 WebView2 / Android WebView 的 CDP 客户端（`list` / `eval` / `contexts` / `nav` / `logs` / `profile` / `metrics`）

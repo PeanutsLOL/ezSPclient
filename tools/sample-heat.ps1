@@ -64,7 +64,8 @@ while (((Get-Date) - $start).TotalSeconds -lt $Seconds) {
 
   $screen = ""
   try {
-    $screen = (& node "$PSScriptRoot/cdp.mjs" eval --target=tauri.localhost --context=3 --expr="(document.querySelector('.screen')||{}).className" 2>$null) -join ""
+    $ctxArg = if ($env:CDP_CONTEXT) { "--context=$($env:CDP_CONTEXT)" } else { "" }
+    $screen = (& node "$PSScriptRoot/cdp.mjs" eval --target=tauri.localhost $ctxArg --expr="(document.querySelector('.screen')||{}).className" 2>$null) -join ""
     $screen = ($screen -replace "^screen\s+", "").Trim()
   } catch { }
 

@@ -6,8 +6,8 @@
 
   "recipe": {
     "$comment": "每一轮都换成同一组敌人：spawnsPerWave 个生成点，每个 count 只，间隔 interval 秒，从 time 秒开始。",
-    "spawnsPerWave": 2,
-    "count": 10,
+    "spawnsPerWave": 4,
+    "count": 30,
     "interval": 1.5,
     "time": 1,
     "routeIndex": 0
@@ -15,6 +15,6 @@
 
   "overrides": {
     "$comment": "想给某一轮单独配方就写在这里，键是轮次（1 起）。留空表示全用 recipe。",
-    "9": { "count": 16 }
+    "9": { "count": 40 }
   }
 }

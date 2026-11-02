@@ -27,7 +27,7 @@ $adbArgs = @()
 if ($Serial) { $adbArgs += @("-s", $Serial) }
 $env:CDP_PORT = "$CdpPort"
 
-function Adb { param([Parameter(ValueFromRemainingArguments = $true)][string[]]$a) & $adb @adbArgs @a 2>$null }
+function Adb { & $adb @adbArgs @args 2>$null }
 
 $hostPart, $portPart = $Server.Split(":")
 if (-not $portPart) { $portPart = "80" }
@@ -46,24 +46,24 @@ try {
 }
 
 Write-Host "[2/6] adb reverse tcp:$portPart ..."
-Adb @("reverse", "tcp:$portPart", "tcp:$portPart") | Out-Null
-Adb @("reverse", "--list") | Out-Null
+Adb "reverse" "tcp:$portPart" "tcp:$portPart" | Out-Null
+Adb "reverse" "--list" | Out-Null
 
 Write-Host "[3/6] 启动应用并连上 CDP ..."
-Adb @("shell", "am", "force-stop", $Pkg) | Out-Null
-Adb @("shell", "am", "start", "-n", "$Pkg/.MainActivity") | Out-Null
+Adb "shell" "am" "force-stop" $Pkg | Out-Null
+Adb "shell" "am" "start" "-n" "$Pkg/.MainActivity" | Out-Null
 Start-Sleep -Seconds 7
-$devicePid = ((Adb @("shell", "pidof", $Pkg)) -join "").Trim()
+$devicePid = ((Adb "shell" "pidof" $Pkg) -join "").Trim()
 if (-not $devicePid) { throw "应用没起来" }
-Adb @("forward", "tcp:$CdpPort", "localabstract:webview_devtools_remote_$devicePid") | Out-Null
+Adb "forward" "tcp:$CdpPort" "localabstract:webview_devtools_remote_$devicePid" | Out-Null
 
 if ($AccelOff) {
   node tools/cdp.mjs eval --target=tauri.localhost --expr="(async()=>{const t=window.__TAURI__.core.invoke;const s=await t('load_state');await t('update_settings',{settings:{...s.settings,performanceAcceleration:false}});return 'accel off';})()" | Out-Null
-  Adb @("shell", "am", "force-stop", $Pkg) | Out-Null
-  Adb @("shell", "am", "start", "-n", "$Pkg/.MainActivity") | Out-Null
+  Adb "shell" "am" "force-stop" $Pkg | Out-Null
+  Adb "shell" "am" "start" "-n" "$Pkg/.MainActivity" | Out-Null
   Start-Sleep -Seconds 7
-  $devicePid = ((Adb @("shell", "pidof", $Pkg)) -join "").Trim()
-  Adb @("forward", "tcp:$CdpPort", "localabstract:webview_devtools_remote_$devicePid") | Out-Null
+  $devicePid = ((Adb "shell" "pidof" $Pkg) -join "").Trim()
+  Adb "forward" "tcp:$CdpPort" "localabstract:webview_devtools_remote_$devicePid" | Out-Null
 }
 
 Write-Host "[4/6] 进游戏（服务器 $Server / 独立模拟 AC-1）..."
@@ -83,6 +83,22 @@ $enter = @"
 "@
 node tools/cdp.mjs eval --target=tauri.localhost --expr="$enter"
 Start-Sleep -Seconds 14
+Start-Sleep -Seconds 10
+
+# 动态找游戏 iframe 的 contextId（contexts 会随页面重建而变，不能写死）
+$gameCtx = $null
+for ($i = 0; $i -lt 20; $i++) {
+  $ctxLines = node tools/cdp.mjs contexts --target=tauri.localhost 2>$null
+  $hit = $ctxLines | Select-String -Pattern "ctx=(\d+).*origin=https?://$([regex]::Escape($hostPart))" | Select-Object -First 1
+  if ($hit -and $hit.Matches.Count -gt 0) {
+    $gameCtx = $hit.Matches[0].Groups[1].Value
+    break
+  }
+  Start-Sleep -Seconds 1
+}
+if (-not $gameCtx) { throw "找不到游戏 iframe 的 context（游戏没加载出来？）" }
+Write-Host "      游戏 context = $gameCtx"
+
 
 $flow = @"
 (async()=>{
@@ -92,6 +108,16 @@ $flow = @"
     return false;
   };
   await sleep(800);
+  // 新装的客户端没有代号：「开始」是灰的，先填一个
+  try {
+    const inp = [...document.querySelectorAll('input')].find(i => /代号|callsign/i.test(i.placeholder || ''));
+    if (inp && !inp.value) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(inp, 'STRESS');
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(300);
+    }
+  } catch (_) {}
   await pick(/^开始$/);
   await sleep(2000);
   await pick(/独立模拟/);
@@ -105,14 +131,21 @@ $flow = @"
   await pick(/华法琳/);
   await sleep(1500);
   await pick(/确认选择/);
-  await sleep(5000);
+  await sleep(4000);
+  // 「准备就绪」是两步：第一下弹确认框，第二下才真的开打 —— 把所有匹配的都点一遍
+  for (const b of [...document.querySelectorAll('button')].filter(x => /准备就绪/.test(x.textContent))) {
+    try { b.click(); } catch (_) {}
+    await sleep(400);
+  }
+  await sleep(3000);
   return (document.querySelector('.screen')||{}).className;
 })()
 "@
-node tools/cdp.mjs eval --target=tauri.localhost --context=3 --expr="$flow"
+node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="$flow"
 
 Write-Host "[5/6] 采样 $Seconds 秒（每 5 秒一次）+ 中段 20 秒 CPU profile ..."
 $env:ADB = $adb
+$env:CDP_CONTEXT = "$gameCtx"
 if ($Serial) { $env:ADB_SERIAL = $Serial }
 $sampler = Start-Job -ScriptBlock {
   param($root, $secs, $csv)
@@ -127,7 +160,7 @@ node tools/cdp.mjs profile --target=tauri.localhost --seconds=20 --out="$outDir/
 # 保持回合推进：在商店/准备阶段点「准备就绪」
 $deadline = (Get-Date).AddSeconds($Seconds)
 while ((Get-Date) -lt $deadline) {
-  node tools/cdp.mjs eval --target=tauri.localhost --context=3 --expr="(()=>{const b=[...document.querySelectorAll('.screen button')].find(x=>/准备就绪/.test(x.textContent)); if(b){b.click(); return 'ready';} return (document.querySelector('.screen')||{}).className;})()" 2>$null | Out-Null
+  node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{const bs=[...document.querySelectorAll('button')].filter(x=>/准备就绪/.test(x.textContent)); if(bs.length){bs.forEach(b=>{try{b.click();}catch(_){}}); return 'ready x'+bs.length;} return (document.querySelector('.screen')||{}).className;})()" 2>$null | Out-Null
   Start-Sleep -Seconds 8
 }
 

@@ -2,8 +2,10 @@ name: iOS release
 
 # iOS 只能在 macOS + Xcode 上构建，所以固定用 macOS runner（Apple Silicon）。
 # 触发方式：
-#   - 手动 Run workflow（可选出包方式）；
-#   - 推送到 ci/** 分支，方便改 workflow 时直接验证。
+#   - 推送到 ci/** 分支（workflow 在当前分支上就会触发，改 workflow 时用它验证）；
+#   - 合并到默认分支后，可以在 Actions 页面手动 Run workflow（可选出包方式）。
+#     GitHub 的 workflow_dispatch 要求 workflow 文件已经在默认分支上，所以 ci 分支上
+#     还没法点按钮，只能靠 push 触发。
 # 没有配置 Apple 签名 secrets 时，流程会降级成"未签名构建"：
 # 仍然编译 + archive + 产出 .ipa，但 .ipa 需要重新签名才能装到 iPhone。
 on:

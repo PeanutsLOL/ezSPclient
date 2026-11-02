@@ -283,7 +283,9 @@ pnpm ios:init                  # = tauri ios init --ci + 同步 App 图标
 [`.github/workflows/ios-release.yml`](../.github/workflows/ios-release.yml) 固定在 `macos-15`
 （Xcode 16+，`tauri ios init` 生成的工程需要）上跑：
 
-1. 手动触发（Actions → iOS release → Run workflow）或推送到 `ci/**` 分支；
+1. 推送到 `ci/**` 分支（workflow 只要在推送的分支上就会触发，适合改 workflow 时直接验证）；
+   合并进默认分支后，也可以在 Actions 页面手动 Run workflow（GitHub 的 `workflow_dispatch`
+   只在默认分支上有这个 workflow 时才出现按钮）；
 2. 没有 Apple 签名 secrets 时：编译 + archive，产物是**未签名** `.ipa` 与 `.xcarchive`
    （ipa 需要 Sideloadly / Xcode 重签后才能装到 iPhone）；
 3. 要出可直接安装 / 上架的 `.ipa`，在仓库 **Settings → Secrets and variables → Actions** 里加：

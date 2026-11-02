@@ -18,7 +18,8 @@ param(
   [int]$Seconds = 90,
   [switch]$AccelOff,
   [string]$Pkg = "top.rakkasei.ezspclient",
-  [int]$CdpPort = 9444
+  [int]$CdpPort = 9444,
+  [bool]$Clean = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,10 @@ Adb "reverse" "--list" | Out-Null
 
 Write-Host "[3/6] 启动应用并连上 CDP ..."
 Adb "shell" "am" "force-stop" $Pkg | Out-Null
+if ($Clean) {
+  Write-Host "      清除应用数据（保证从大厅开始）..."
+  Adb "shell" "pm" "clear" $Pkg | Out-Null
+}
 Adb "shell" "am" "start" "-n" "$Pkg/.MainActivity" | Out-Null
 Start-Sleep -Seconds 7
 $devicePid = ((Adb "shell" "pidof" $Pkg) -join "").Trim()
@@ -64,6 +69,13 @@ if ($AccelOff) {
   Start-Sleep -Seconds 7
   $devicePid = ((Adb "shell" "pidof" $Pkg) -join "").Trim()
   Adb "forward" "tcp:$CdpPort" "localabstract:webview_devtools_remote_$devicePid" | Out-Null
+}
+
+# 等启动器初始化（pm clear 之后 init() 需要一点时间；没就绪就调 connect 会静默失败）
+for ($i = 0; $i -lt 30; $i++) {
+  $ready = node tools/cdp.mjs eval --target=tauri.localhost --expr="(typeof connect === 'function' && typeof snap !== 'undefined' && snap) ? 'yes' : 'no'" 2>$null
+  if (("$ready") -match "yes") { break }
+  Start-Sleep -Seconds 1
 }
 
 Write-Host "[4/6] 进游戏（服务器 $Server / 独立模拟 AC-1）..."
@@ -99,6 +111,23 @@ for ($i = 0; $i -lt 20; $i++) {
 if (-not $gameCtx) { throw "找不到游戏 iframe 的 context（游戏没加载出来？）" }
 Write-Host "      游戏 context = $gameCtx"
 
+# 清掉上一局的会话（否则会直接落在结算页），然后 reload 让 iframe 回到大厅
+node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{try{localStorage.removeItem('sp.matches');localStorage.removeItem('sp.tokens');}catch(_){} location.reload(); return 'reload';})()" 2>$null | Out-Null
+Start-Sleep -Seconds 6
+for ($i = 0; $i -lt 20; $i++) {
+  $ctxLines = node tools/cdp.mjs contexts --target=tauri.localhost 2>$null
+  $hit = $ctxLines | Select-String -Pattern "ctx=(\d+).*origin=https?://$([regex]::Escape($hostPart))" | Select-Object -First 1
+  if ($hit -and $hit.Matches.Count -gt 0) {
+    $maybe = $hit.Matches[0].Groups[1].Value
+    if ($maybe -ne $gameCtx) { $gameCtx = $maybe; break }
+  }
+  Start-Sleep -Seconds 1
+}
+$env:CDP_CONTEXT = "$gameCtx"
+Write-Host "      reload 后 context = $gameCtx"
+
+
+
 
 $flow = @"
 (async()=>{
@@ -108,6 +137,14 @@ $flow = @"
     return false;
   };
   await sleep(800);
+  // 上一局可能还停在结算页：先退回大厅，否则点「开始」没用
+  for (let i = 0; i < 10; i++) {
+    const sc = (document.querySelector('.screen') || {}).className || '';
+    if (!/result|settle/.test(sc)) break;
+    const back = [...document.querySelectorAll('button')].find(b => /返回|离开|退出|确定|继续|下一步|再来/.test(b.textContent));
+    if (back) { try { back.click(); } catch (_) {} }
+    await sleep(900);
+  }
   // 新装的客户端没有代号：「开始」是灰的，先填一个
   try {
     const inp = [...document.querySelectorAll('input')].find(i => /代号|callsign/i.test(i.placeholder || ''));
@@ -132,12 +169,7 @@ $flow = @"
   await sleep(1500);
   await pick(/确认选择/);
   await sleep(4000);
-  // 「准备就绪」是两步：第一下弹确认框，第二下才真的开打 —— 把所有匹配的都点一遍
-  for (const b of [...document.querySelectorAll('button')].filter(x => /准备就绪/.test(x.textContent))) {
-    try { b.click(); } catch (_) {}
-    await sleep(400);
-  }
-  await sleep(3000);
+  // 开打交给采样循环（它能识别两步确认，并能在每轮之间补点）
   return (document.querySelector('.screen')||{}).className;
 })()
 "@
@@ -175,14 +207,50 @@ node tools/cdp.mjs profile --target=tauri.localhost --seconds=20 --out="$outDir/
 
 # 保持回合推进：在商店/准备阶段点「准备就绪」
 $deadline = (Get-Date).AddSeconds($Seconds)
+$phaseRows = New-Object System.Collections.Generic.List[string]
+$phaseRows.Add("ts,screen,cpu_s") | Out-Null
+
 while ((Get-Date) -lt $deadline) {
-  node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{const bs=[...document.querySelectorAll('button')].filter(x=>/准备就绪/.test(x.textContent)); if(bs.length){bs.forEach(b=>{try{b.click();}catch(_){}}); return 'ready x'+bs.length;} return (document.querySelector('.screen')||{}).className;})()" 2>$null | Out-Null
-  Start-Sleep -Seconds 8
+  $screenNow = node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{const bs=[...document.querySelectorAll('button')].filter(x=>/准备就绪/.test(x.textContent)); if(bs.length){bs.forEach(b=>{try{b.click();}catch(_){}});} return (document.querySelector('.screen')||{}).className;})()" 2>$null
+  $screenText = ("$screenNow").Trim()
+  $statRaw = ((& $adb @adbArgs shell cat "/proc/$devicePid/stat") -join " ").Trim()
+  $cpuSec = ""
+  if ($statRaw) {
+    $parts = $statRaw -split '\s+'
+    if ($parts.Count -ge 15) { $cpuSec = [math]::Round((([double]$parts[13] + [double]$parts[14]) / 100.0), 2) }
+  }
+  $phaseRows.Add("$(Get-Date -Format 'HH:mm:ss'),$screenText,$cpuSec") | Out-Null
+  Start-Sleep -Seconds 3
 }
 
-Wait-Job $sampler | Out-Null
-Receive-Job $sampler | Out-Null
-Remove-Job $sampler -Force
+$phaseRows | Set-Content -Path "$outDir/phase.csv" -Encoding utf8
+
+# 事后按「连续战斗段」累加 CPU 与时长
+$combatCpu = 0.0
+$combatWall = 0.0
+$segStartCpu = $null
+$segStartTs = $null
+$prevTs = $null
+foreach ($line in ($phaseRows | Select-Object -Skip 1)) {
+  $c = $line -split ","
+  if ($c.Count -lt 3) { continue }
+  $ts = [datetime]::ParseExact($c[0], "HH:mm:ss", $null)
+  $isCombat = ($c[1] -match "combat")
+  $cpuVal = if ($c[2]) { [double]$c[2] } else { $null }
+
+  if ($isCombat) {
+    if ($null -eq $segStartCpu -and $null -ne $cpuVal) { $segStartCpu = $cpuVal; $segStartTs = $ts }
+    if ($null -ne $prevTs) { $combatWall += ($ts - $prevTs).TotalSeconds }
+  } elseif ($null -ne $segStartCpu -and $null -ne $cpuVal) {
+    $combatCpu += ($cpuVal - $segStartCpu)
+    $segStartCpu = $null
+  }
+  $prevTs = $ts
+}
+if ($null -ne $segStartCpu) {
+  $last = ($phaseRows | Select-Object -Last 1) -split ","
+  if ($last[2]) { $combatCpu += ([double]$last[2] - $segStartCpu) }
+}
 
 Write-Host "[6/6] 汇总 ..."
 $rows = Import-Csv "$outDir/samples.csv"
@@ -202,6 +270,11 @@ $summary += "app CPU        : $([math]::Round($dCpu,1)) s  =>  $([math]::Round($
 $summary += "battery temp   : $($first.battery_c) -> $($last.battery_c) (peak $battPeak)"
 $summary += "cpu temp avg   : $($first.cpu_avg_c) -> $($last.cpu_avg_c)"
 $summary += "cpu temp peak  : $cpuPeak"
+if ($combatWall -gt 1) {
+  $summary += "combat-only    : $([math]::Round($combatCpu,1)) s CPU / $([math]::Round($combatWall,1)) s => $([math]::Round($combatCpu / $combatWall,2)) cores"
+} else {
+  $summary += "combat-only    : (这次没有采到战斗段)"
+}
 $summary -join "`n" | Tee-Object -FilePath "$outDir/summary.txt"
 
 Write-Host ""

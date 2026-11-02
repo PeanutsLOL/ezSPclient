@@ -48,6 +48,33 @@ function readJson(file) {
 
 // ---------------------------------------------------------------- 波次改写（逻辑在 waves.mjs，供两处共用）
 
+// ---------------------------------------------------------------- 素材清单自检
+// data/assets.json        社区 dump 的素材
+// data/local-assets.json  官方客户端提取的本地素材（客户端看到它才会启用官方美术与 3D 棋盘）
+function inspectAssetManifests() {
+  const read = (f) => {
+    const file = path.join(GAME, "data", f);
+    if (!fs.existsSync(file)) return { present: false, count: 0 };
+    try {
+      const json = JSON.parse(fs.readFileSync(file, "utf8"));
+      return { present: true, count: Number(json.count || json.stats?.files || 0) };
+    } catch {
+      return { present: true, count: -1 };
+    }
+  };
+  const community = read("assets.json");
+  const local = read("local-assets.json");
+  if (!local.present) {
+    log("⚠️  缺 data/local-assets.json：客户端不会启用官方本地美术，3D 棋盘也不会加载");
+    log("    修法：powershell -File testserver/setup.ps1 -LocalPack <已装好的游戏目录>");
+  } else {
+    log(`素材清单：assets.json ${community.count} 项，local-assets.json ${local.count} 项（官方本地包）`);
+  }
+  return { community, local };
+}
+
+const manifests = inspectAssetManifests();
+
 const patched = buildPatchedWaves({ game: GAME, recipe: RECIPE_FILE });
 
 log(`游戏目录 ${GAME}`);
@@ -120,7 +147,11 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.url === "/__stress/info") {
-    const info = JSON.stringify({ mode: patched.mode, rounds: patched.rounds, touched: patched.touched }, null, 2);
+    const info = JSON.stringify(
+      { mode: patched.mode, rounds: patched.rounds, touched: patched.touched, assets: manifests },
+      null,
+      2,
+    );
     res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
     res.end(info);
     return;

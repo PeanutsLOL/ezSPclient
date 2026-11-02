@@ -1,8 +1,6 @@
 package top.rakkasei.ezspclient
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream
@@ -13,26 +11,111 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * [ezSPclient] 本地拦截与加速器（源码存放在 `tools/android/`，由 patch-client.py 复制进生成的工程）：
+ * [ezSPclient] 本地 JS 拦截（源码在 `tools/android/`，由 patch-client.py 构建前复制进生成工程）。
  *
- * 1. 拦截 `simWorker.js`：换成线性消息队列版本，去掉原实现的 Promise 链堆积（V8 微任务 + GC 压力）。
- * 2. 静态二进制资源（字体 / 贴图 / 音频 / Spine）本地落盘直出：游戏服务器对所有资源都是
- *    `Cache-Control: no-cache` + ETag，等于每次启动都要逐条回源做条件请求；命中本地缓存后
- *    直接返回，省掉成百上千次往返与射频唤醒。
+ * 只做两件事，**不做资源缓存** —— 游戏自己已经用 CacheStorage（`js/assetCache.js` 的
+ * `cache.put(url, response)`）持久化素材，外壳再存一份只会双倍占用、双倍下载，而且
+ * CacheStorage 的读取不经过 `shouldInterceptRequest`，那层缓存基本打不中。
  *
- * 缓存只覆盖**二进制**资源，绝不缓存 js/css/json —— 否则游戏更新时客户端会拿到过期代码。
+ * 1. `simWorker.js` → 线性消息队列实现。原版 `queue = queue.then(...)` 把每条命令串成一个
+ *    Promise 链，战斗一热就有上千个节点堆在微任务队列里，V8 的 GC 被打得很碎。
+ * 2. `simWorkerRuntime.js` → 只改一处：`Array(n).fill(null)` 换成 `new Array(n)`。
+ *    消费方只取 `.length`（`runner.js`: `Array.isArray(b.enemies) ? b.enemies.length : 0`），
+ *    原来的写法每个包都要写满 n 个指针，纯浪费。
  */
 object LocalInterceptor {
 
-    /** 缓存上限，超过后按最后修改时间淘汰（够放一整套素材，又不至于把手机塞满）。 */
-    private const val CACHE_LIMIT_BYTES = 256L * 1024 * 1024
+    fun intercept(context: Context, request: WebResourceRequest): WebResourceResponse? {
+        val url = request.url ?: return null
+        val path = url.path ?: ""
+        val absolute = url.toString()
+        if (!loggedActive) {
+            loggedActive = true
+            debugLog("interceptor active")
+        }
 
-    /** 没网/计量网络时不做预热，避免和 WebView 自身的下载重复拉一份（双倍流量）。 */
-    @Volatile
-    private var prefetchAllowed = true
+        // 1) 战斗仿真 Worker：直接换成优化实现
+        if (path.endsWith("/js/battle/simWorker.js")) {
+            return textResponse(OPTIMIZED_SIM_WORKER, "application/javascript")
+        }
 
-    private val cacheDirOf: (Context) -> File = { ctx ->
-        File(ctx.cacheDir, "ezsp_game_cache").apply { if (!exists()) mkdirs() }
+        // 2) simWorkerRuntime：首次请求先放原版，同时后台生成改写版；之后一律用改写版
+        if (path.endsWith("/js/battle/simWorkerRuntime.js")) {
+            val patched = patchedFile(context, absolute)
+            if (patched.isFile && patched.length() > 0) return fileResponse(patched)
+            background { buildPatchedRuntime(absolute, patched) }
+            return null
+        }
+
+        return null
+    }
+
+    // ---------------------------------------------------------------- simWorkerRuntime 的一次性改写
+
+    private fun patchDir(ctx: Context): File =
+        File(ctx.cacheDir, "ezsp_js_patch").apply { if (!exists()) mkdirs() }
+
+    private fun patchedFile(ctx: Context, url: String): File {
+        val name = Integer.toHexString(url.hashCode()) + ".js"
+        return File(patchDir(ctx), name)
+    }
+
+    /**
+     * 下载原版 → 应用最小改写 → 落盘。模式找不到或网络出错就什么都不写，
+     * 下次继续用原版，绝不返回半成品。
+     */
+    private fun buildPatchedRuntime(url: String, target: File) {
+        try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 6000
+            conn.readTimeout = 15000
+            if (conn.responseCode != 200) return
+            val source = conn.inputStream.bufferedReader().use { it.readText() }
+            val rewritten = source.replace(
+                "Array(b.enemies?.length || 0).fill(null)",
+                "new Array(b.enemies?.length || 0)",
+            )
+            if (rewritten == source) {
+                debugLog("patch pattern not found in simWorkerRuntime")
+                return
+            }
+            val tmp = File(target.parentFile, target.name + ".tmp")
+            tmp.writeText(rewritten)
+            if (tmp.renameTo(target)) {
+                debugLog("patched simWorkerRuntime ${source.length} -> ${rewritten.length}")
+            } else {
+                tmp.delete()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    // ---------------------------------------------------------------- 工具
+
+    private fun textResponse(body: String, mime: String): WebResourceResponse =
+        WebResourceResponse(
+            mime, "utf-8", 200, "OK",
+            mapOf(
+                "Access-Control-Allow-Origin" to "*",
+                "Content-Type" to "$mime; charset=utf-8",
+                "Cache-Control" to "no-cache",
+            ),
+            ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)),
+        )
+
+    private fun fileResponse(file: File): WebResourceResponse =
+        WebResourceResponse(
+            "application/javascript", "utf-8", 200, "OK",
+            mapOf(
+                "Access-Control-Allow-Origin" to "*",
+                "Content-Type" to "application/javascript; charset=utf-8",
+                "Cache-Control" to "no-cache",
+            ),
+            FileInputStream(file),
+        )
+
+    private fun background(block: () -> Unit) {
+        Thread(block, "ezsp-io").apply { isDaemon = true }.start()
     }
 
     private val OPTIMIZED_SIM_WORKER = """
@@ -46,8 +129,9 @@ object LocalInterceptor {
         async function flushQueue() {
           if (isProcessing) return;
           isProcessing = true;
-          while (msgQueue.length > 0) {
-            const data = msgQueue.shift();
+          let i = 0;
+          while (i < msgQueue.length) {
+            const data = msgQueue[i++];
             try {
               const res = await dispatch(data.method, data.args);
               globalThis.postMessage({ id: data.id, value: res });
@@ -58,6 +142,7 @@ object LocalInterceptor {
               });
             }
           }
+          msgQueue.length = 0;
           isProcessing = false;
         }
 
@@ -67,78 +152,9 @@ object LocalInterceptor {
         };
     """.trimIndent()
 
-    fun intercept(context: Context, request: WebResourceRequest): WebResourceResponse? {
-        val url = request.url ?: return null
-        val path = url.path ?: ""
-
-        // 1) 战斗仿真 Worker：体积小、热路径，直接替换实现
-        if (path.endsWith("/js/battle/simWorker.js")) {
-            val bytes = OPTIMIZED_SIM_WORKER.toByteArray(Charsets.UTF_8)
-            return WebResourceResponse(
-                "application/javascript",
-                "utf-8",
-                200,
-                "OK",
-                mapOf(
-                    "Access-Control-Allow-Origin" to "*",
-                    "Content-Type" to "application/javascript; charset=utf-8",
-                    "Cache-Control" to "no-cache",
-                ),
-                ByteArrayInputStream(bytes),
-            )
-        }
-
-        // 2) 二进制静态资源：命中即本地直出
-        if (!isCacheableBinary(path) || !request.method.equals("GET", ignoreCase = true)) return null
-
-        val cacheDir = cacheDirOf(context)
-        val cached = File(cacheDir, cacheName(url.toString()))
-
-        if (cached.isFile && cached.length() > 0) {
-            debugLog("cache hit ${cached.name} (${cached.length()}B)")
-            return try {
-                val headers = mapOf("Cache-Control" to "max-age=604800")
-                WebResourceResponse(guessMimeType(path), null, 200, "OK", headers, FileInputStream(cached))
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        debugLog("cache miss ${url.path} prefetch=$prefetchAllowed")
-
-        // 3) 未命中：仅在非计量网络下后台补一份，给下一次启动用（本次仍走正常网络，不阻塞）
-        if (prefetchAllowed) {
-            Thread {
-                try {
-                    val conn = URL(url.toString()).openConnection() as HttpURLConnection
-                    conn.connectTimeout = 6000
-                    conn.readTimeout = 10000
-                    if (conn.responseCode == 200) {
-                        val tmp = File(cacheDir, cacheName(url.toString()) + ".tmp")
-                        conn.inputStream.use { input -> FileOutputStream(tmp).use { output -> input.copyTo(output) } }
-                        if (tmp.length() > 0) {
-                            tmp.renameTo(cached)
-                            pruneIfNeeded(cacheDir)
-                        } else {
-                            tmp.delete()
-                        }
-                    }
-                } catch (_: Exception) {
-                    // 预热失败无所谓：下次启动再试
-                }
-            }.start()
-        }
-        return null
-    }
-
-    /** 由 MainActivity 在拿到网络状态后调用，决定要不要做后台预热。 */
-    fun setPrefetchAllowed(allowed: Boolean) {
-        prefetchAllowed = allowed
-        debugLog("prefetchAllowed=$allowed")
-    }
-
-    /** 诊断日志：只打前 20 条，避免刷屏。 */
-    private var logBudget = 20
+    /** 诊断日志：限前 10 条。 */
+    private var logBudget = 10
+    private var loggedActive = false
     private fun debugLog(msg: String) {
         if (logBudget <= 0) return
         logBudget--
@@ -146,65 +162,5 @@ object LocalInterceptor {
             android.util.Log.i("ezSPclient", "[intercept] $msg")
         } catch (_: Exception) {
         }
-    }
-
-    /** 计量网络（蜂窝）或没有网络时不做预热。 */
-    fun detectPrefetchAllowed(context: Context): Boolean {
-        return try {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
-            caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    private fun isCacheableBinary(path: String): Boolean {
-        val lower = path.lowercase()
-        // js/css/json/html 一律不进缓存：游戏更新后必须拿到新代码
-        return lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".jpg") ||
-            lower.endsWith(".jpeg") || lower.endsWith(".avif") || lower.endsWith(".mp3") ||
-            lower.endsWith(".ogg") || lower.endsWith(".wav") || lower.endsWith(".m4a") ||
-            lower.endsWith(".atlas") || lower.endsWith(".skel") || lower.endsWith(".woff2") ||
-            lower.endsWith(".woff") || lower.endsWith(".ttf")
-    }
-
-    /** 文件名 = URL 的稳定指纹 + 原扩展名：避免长 URL 截断后互相撞车。 */
-    private fun cacheName(url: String): String {
-        val ext = url.substringAfterLast('.', "").takeIf { it.length in 1..5 && it.all { c -> c.isLetterOrDigit() } } ?: "bin"
-        // 32 位 Java hashCode 会撞，这里用两路 hash 拼一下，够用且不需要引入依赖
-        val h1 = url.hashCode().toUInt().toString(16)
-        val h2 = url.fold(17L) { acc, c -> (acc * 31 + c.code) and 0xFFFFFFFFL }.toString(16)
-        return "$h1$h2.$ext"
-    }
-
-    /** 超过上限就按 lastModified 由旧到新删，直到降回上限以内。 */
-    private fun pruneIfNeeded(cacheDir: File) {
-        val files = cacheDir.listFiles() ?: return
-        var total = 0L
-        for (f in files) total += f.length()
-        if (total <= CACHE_LIMIT_BYTES) return
-        files.sortBy { it.lastModified() }
-        for (f in files) {
-            if (total <= CACHE_LIMIT_BYTES) break
-            val len = f.length()
-            if (f.delete()) total -= len
-        }
-    }
-
-    private fun guessMimeType(path: String): String = when {
-        path.endsWith(".png") -> "image/png"
-        path.endsWith(".webp") -> "image/webp"
-        path.endsWith(".jpg") || path.endsWith(".jpeg") -> "image/jpeg"
-        path.endsWith(".avif") -> "image/avif"
-        path.endsWith(".mp3") -> "audio/mpeg"
-        path.endsWith(".ogg") -> "audio/ogg"
-        path.endsWith(".wav") -> "audio/wav"
-        path.endsWith(".m4a") -> "audio/mp4"
-        path.endsWith(".woff2") -> "font/woff2"
-        path.endsWith(".woff") -> "font/woff"
-        path.endsWith(".ttf") -> "font/ttf"
-        else -> "application/octet-stream"
     }
 }

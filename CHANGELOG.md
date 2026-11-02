@@ -44,6 +44,23 @@
   由 `patch-client.py` 在每次构建前复制进生成工程，`gen/` 保持“随时可删可重建”
 - 诊断：`LocalInterceptor` 在 logcat（tag `ezSPclient`）打印倍率决策与缓存命中/未命中（限前 20 条）
 
+### 迭代三（撤掉重复的素材缓存，改攻 CPU 侧）
+
+- **撤掉外壳自建的素材磁盘缓存**：游戏自己已经用 CacheStorage 持久化素材（`js/assetCache.js` 的
+  `cache.put(url, response)`，配套「下载完整素材 / 导入素材包 / 申请持久化存储」），外壳再存一份是双倍占用、
+  双倍下载；而且 CacheStorage 的读取不经过 `shouldInterceptRequest`，那层缓存几乎打不中。现在 `LocalInterceptor`
+  只做 JS 改写，不碰任何素材
+- **修复：拦截补丁在构建时被 `rustBuild*` 覆盖**（上一轮“已修复”其实没有）：`tauri android build` 里
+  `rustBuild*` 任务会在 Kotlin 编译前重新生成 `generated/*.kt`，只靠 `compileKotlin dependsOn patch` 仍会被冲掉。
+  现在给 `rustBuild*` 加 `finalizedBy("ezspPatchClient")` + 给补丁任务加 `mustRunAfter`。
+  实测：构建结束后 `RustWebViewClient.kt` 仍是 `CLIENT PATCHED`，运行期 logcat 出现 `[intercept] interceptor active`
+- **`simWorkerRuntime.js` 单点改写**：把 `Array(b.enemies?.length || 0).fill(null)` 换成 `new Array(...)`。
+  消费方只取 `.length`（`runner.js` 的 `uniteLeftMark`），原写法每个包都要写满 n 个指针。
+  实测：首次请求返回原版（4787 B），后台改写落盘后再次请求即为改写版（含 `new Array(b.enemies`、无 `fill(null)`）
+- **帧率自适应降档**：注入的 rAF 节流器统计帧间隔 EMA，连续 150 帧仍慢于 20 ms（≈<50 fps）时把上限从 60 压到 30，
+  只降不升避免抖动。跑得动的设备完全不变；跑不动的设备少排一半无效帧。实测注入已生效
+  （`requestAnimationFrame.toString()` 含该逻辑），这台模拟器场景下 EMA 未越阈值故未触发
+
 ### 工具
 
 - 新增 `tools/cdp.mjs`：本机 WebView2 / Android WebView 的 CDP 客户端（`list` / `eval` / `contexts` / `nav` / `logs` / `profile` / `metrics`）

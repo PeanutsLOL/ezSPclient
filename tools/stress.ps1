@@ -143,6 +143,22 @@ $flow = @"
 "@
 node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="$flow"
 
+# 设备与配置元数据：跨分辨率/跨配置对比时，产物自己能说明白
+$wmSize = ((Adb "shell" "wm" "size") -join " ").Trim()
+$wmDensity = ((Adb "shell" "wm" "density") -join " ").Trim()
+$dpr = (node tools/cdp.mjs eval --target=tauri.localhost --expr="devicePixelRatio" 2>$null) -join ""
+$cfg = (node tools/cdp.mjs eval --target=tauri.localhost --expr="(async()=>{const t=window.__TAURI__.core.invoke;const s=await t('load_state');return JSON.stringify({accel:s.settings.performanceAcceleration,scale:s.settings.renderScale});})()" 2>$null) -join ""
+@(
+  "serial   : $Serial",
+  "server   : $Server",
+  "wm size  : $wmSize",
+  "wm density: $wmDensity",
+  "dpr      : $dpr",
+  "settings : $cfg",
+  "label    : $Label"
+) -join "`n" | Set-Content -Path "$outDir/metadata.txt" -Encoding utf8
+Write-Host "      $wmSize | $wmDensity | dpr=$dpr | $cfg"
+
 Write-Host "[5/6] 采样 $Seconds 秒（每 5 秒一次）+ 中段 20 秒 CPU profile ..."
 $env:ADB = $adb
 $env:CDP_CONTEXT = "$gameCtx"
@@ -180,6 +196,7 @@ $summary = @()
 $summary += "label          : $Label"
 $summary += "server         : $Server"
 $summary += "serial         : $Serial"
+$summary += "screen         : $wmSize / $wmDensity / dpr=$dpr"
 $summary += "window         : $([math]::Round($wall,1)) s"
 $summary += "app CPU        : $([math]::Round($dCpu,1)) s  =>  $([math]::Round($dCpu/$wall,2)) cores"
 $summary += "battery temp   : $($first.battery_c) -> $($last.battery_c) (peak $battPeak)"

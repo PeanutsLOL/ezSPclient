@@ -29,6 +29,16 @@
   误触浮球而中断；点一下展开中的卡片可以重新计时，方便多看两眼
 - 浮球会避开刘海 / 挖孔的安全区（`env(safe-area-inset-*)` 探针），展开的卡片按剩余空间自适应宽度
 
+### iOS
+
+- **iOS release 构建链路**：新增 `.github/workflows/ios-release.yml`（`macos-15` + Xcode 16）：
+  `tauri ios init` → 无签名 archive → 有 Apple secrets 时用 `xcodebuild -exportArchive` 导出签名 IPA；
+  没有 secrets 时产出未签名 `.ipa` / `.xcarchive`，可在本地重签后安装
+- **`src-tauri/Info.ios.plist`**：由 `tauri ios build` 自动合并 —— ATS 放行明文 HTTP、本地网络用途说明、
+  锁横屏 + 全屏（对应 Android 的 `sensorLandscape` + 沉浸式）
+- **`tools/sync-ios-icons.py`**：`tauri ios init` 用的是模板占位图标，构建前把 `src-tauri/icons/ios`
+  同步进去（`pnpm ios:init` 会自动调用）
+
 ## [0.2.2] - 2026-10-12
 
 ### 变更

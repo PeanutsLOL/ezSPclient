@@ -18,7 +18,11 @@
     "android:patch": "python tools/patch-android.py",
     "android:dev": "python tools/patch-android.py && tauri android dev",
     "android:build": "python tools/patch-android.py && tauri android build --apk --target aarch64",
-    "android:build:debug": "python tools/patch-android.py && tauri android build --debug --apk --target aarch64"
+    "android:build:debug": "python tools/patch-android.py && tauri android build --debug --apk --target aarch64",
+    "ios:init": "tauri ios init --ci && python3 tools/sync-ios-icons.py",
+    "ios:icons": "python3 tools/sync-ios-icons.py",
+    "ios:build": "tauri ios build --target aarch64",
+    "ios:build:unsigned": "tauri ios build --target aarch64 --no-sign"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"

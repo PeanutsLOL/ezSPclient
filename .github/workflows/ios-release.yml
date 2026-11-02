@@ -1,0 +1,280 @@
+name: iOS release
+
+# iOS 只能在 macOS + Xcode 上构建，所以固定用 macOS runner（Apple Silicon）。
+# 触发方式：
+#   - 手动 Run workflow（可选出包方式）；
+#   - 推送到 ci/** 分支，方便改 workflow 时直接验证。
+# 没有配置 Apple 签名 secrets 时，流程会降级成"未签名构建"：
+# 仍然编译 + archive + 产出 .ipa，但 .ipa 需要重新签名才能装到 iPhone。
+on:
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: "签名导出方式（配置 Apple secrets 后才生效）"
+        type: choice
+        default: app-store-connect
+        options:
+          - app-store-connect # App Store / TestFlight 提交包
+          - release-testing # ad-hoc，只能装已登记 UDID
+          - debugging # 开发设备
+  push:
+    branches:
+      - 'ci/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: Build iOS release
+    # tauri ios init 生成的 Xcode 工程是 objectVersion 77，需要 Xcode 16+；
+    # macos-14 自带的 Xcode 打不开，所以固定 macos-15。
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Xcode
+        run: |
+          set -euo pipefail
+          xcode-select -p
+          xcodebuild -version
+          version="$(xcodebuild -version | head -1 | awk '{print $2}')"
+          major="${version%%.*}"
+          if [ "$major" -lt 16 ]; then
+            echo "::error::Xcode $version 太旧：tauri ios init 生成 objectVersion 77 的工程，需要 Xcode 16+"
+            exit 1
+          fi
+          xcodebuild -showsdks | grep -i 'iOS' || true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Install Rust + iOS target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ios-aarch64
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Ensure iOS runtime
+        # `tauri ios build` 会检查有没有 iOS simulator runtime；没有的话它在 CI 里会直接失败。
+        # GitHub 的 macOS 镜像通常自带，这里只做兜底。
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes
+          if ! xcrun simctl list runtimes | grep -q 'iOS'; then
+            echo "::warning::没有 iOS runtime，开始下载（可能要几分钟）"
+            sudo xcodebuild -downloadPlatform iOS
+          fi
+
+      - name: Generate iOS project
+        run: pnpm tauri ios init --ci
+
+      - name: Sync app icons
+        # `tauri ios init` 铺的是模板自带的 Tauri 占位图标，这里换成 src-tauri/icons/ios。
+        run: python3 tools/sync-ios-icons.py
+
+      - name: Detect Apple signing secrets
+        id: signing
+        env:
+          CERT: ${{ secrets.IOS_CERTIFICATE }}
+          PROFILE: ${{ secrets.IOS_MOBILE_PROVISION }}
+          TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${CERT:-}" ] || missing+=("IOS_CERTIFICATE")
+          [ -n "${PROFILE:-}" ] || missing+=("IOS_MOBILE_PROVISION")
+          [ -n "${TEAM:-}" ] || missing+=("APPLE_DEVELOPMENT_TEAM")
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::已配置 Apple 签名材料，将导出可安装的 .ipa"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::缺少签名 secrets（${missing[*]}），本次只出未签名产物；.ipa 需要重新签名才能装到设备"
+          fi
+
+      # 未签名路径：只验证 iOS 能编译、能 archive，并产出一个未签名 .ipa。
+      - name: Build unsigned
+        if: steps.signing.outputs.present != 'true'
+        run: pnpm tauri ios build --target aarch64 --no-sign
+
+      # 签名路径：Tauri 的 Xcode 工程把 CODE_SIGN_IDENTITY 写死成 iPhone Developer，
+      # 直接让 `tauri ios build` 用 App Store/ad-hoc 描述文件签名会解析失败。
+      # 所以先无签名 archive，再用 xcodebuild 手动指定证书与描述文件导出（已验证的做法）。
+      - name: Import signing identity
+        if: steps.signing.outputs.present == 'true'
+        env:
+          CERT: ${{ secrets.IOS_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_MOBILE_PROVISION }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          pass="$(openssl rand -base64 24)"
+          security create-keychain -p "$pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pass" "$keychain"
+
+          printf '%s' "$CERT" | openssl base64 -d -A > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "${CERT_PASSWORD:-}" \
+            -T /usr/bin/codesign -T /usr/bin/xcodebuild
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pass" "$keychain" >/dev/null
+
+          printf '%s' "$PROFILE" | openssl base64 -d -A > "$RUNNER_TEMP/profile.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")"
+          name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")"
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" \
+                     "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            cp "$RUNNER_TEMP/profile.mobileprovision" "$dir/$uuid.mobileprovision"
+          done
+          echo "PROFILE_NAME=$name" >> "$GITHUB_ENV"
+          echo "PROFILE_UUID=$uuid" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "::notice::已导入证书与描述文件 $name ($uuid)"
+
+      - name: Archive unsigned
+        if: steps.signing.outputs.present == 'true'
+        run: pnpm tauri ios build --target aarch64 --no-sign
+
+      - name: Export signed IPA
+        if: steps.signing.outputs.present == 'true'
+        env:
+          TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+          EXPORT_METHOD: ${{ inputs.export_method || 'app-store-connect' }}
+        run: |
+          set -euo pipefail
+          archive="$(find src-tauri/gen/apple/build -maxdepth 1 -name '*.xcarchive' | head -1)"
+          if [ -z "$archive" ]; then
+            echo "::error::没有生成 .xcarchive"
+            exit 1
+          fi
+
+          if [ "$EXPORT_METHOD" = "debugging" ]; then
+            cert="Apple Development"
+          else
+            cert="Apple Distribution"
+          fi
+
+          opts="$RUNNER_TEMP/ExportOptions.plist"
+          rm -f "$opts"
+          plutil -create xml1 "$opts"
+          /usr/libexec/PlistBuddy \
+            -c "Add :method string $EXPORT_METHOD" \
+            -c "Add :teamID string $TEAM" \
+            -c "Add :signingStyle string manual" \
+            -c "Add :signingCertificate string $cert" \
+            -c "Add :provisioningProfiles dict" \
+            -c "Add :provisioningProfiles:top.rakkasei.ezspclient string $PROFILE_NAME" \
+            "$opts"
+          plutil -lint "$opts"
+
+          rm -rf src-tauri/gen/apple/build/export
+          xcodebuild -exportArchive \
+            -archivePath "$archive" \
+            -exportOptionsPlist "$opts" \
+            -exportPath src-tauri/gen/apple/build/export
+
+      - name: Verify Info.plist overrides
+        # 确认 src-tauri/Info.ios.plist 真的合并进了打进包里的 Info.plist：
+        # ATS 明文例外、横屏配置缺一个，装到手机上就会连不上/转屏不对。
+        run: |
+          set -euo pipefail
+          info="$(find src-tauri/gen/apple/build -path '*/Products/Applications/*.app/Info.plist' | head -1)"
+          if [ -z "$info" ]; then
+            echo "::error::找不到包里的 Info.plist"
+            exit 1
+          fi
+          ats="$(/usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsArbitraryLoads' "$info" 2>/dev/null || true)"
+          if [ "$ats" != "true" ]; then
+            echo "::error::Info.ios.plist 没有被合并：ATS 明文例外缺失"
+            exit 1
+          fi
+          echo "::notice::ATS 明文例外已生效"
+          /usr/libexec/PlistBuddy -c 'Print :UISupportedInterfaceOrientations' "$info"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info"
+
+      - name: Upload unsigned build
+        if: steps.signing.outputs.present != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezspclient-ios-unsigned
+          path: |
+            src-tauri/gen/apple/build/**/*.ipa
+            src-tauri/gen/apple/build/**/*.xcarchive
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload signed IPA
+        if: steps.signing.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezspclient-ios-${{ inputs.export_method || 'app-store-connect' }}
+          path: src-tauri/gen/apple/build/export/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Clean up keychain
+        if: always() && steps.signing.outputs.present == 'true'
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN:-}" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi
+          if [ -n "${PROFILE_UUID:-}" ]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" || true
+            rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision" || true
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          EXPORT_METHOD: ${{ inputs.export_method || 'app-store-connect' }}
+        run: |
+          {
+            echo "## iOS build"
+            echo ""
+            if [ "${{ steps.signing.outputs.present }}" = "true" ]; then
+              echo "- 签名导出：\`${EXPORT_METHOD}\`"
+            else
+              echo "- **未签名**：产物不能直接装到 iPhone，需要用 Sideloadly / Xcode 重新签名。"
+              echo "- 配置 \`IOS_CERTIFICATE\`（.p12 的 base64）、\`IOS_CERTIFICATE_PASSWORD\`、\`IOS_MOBILE_PROVISION\`（.mobileprovision 的 base64）、\`APPLE_DEVELOPMENT_TEAM\` 后重新运行即可出可安装的 IPA。"
+            fi
+            echo ""
+            find src-tauri/gen/apple/build -name '*.ipa' -print 2>/dev/null | sed 's/^/- `/; s/$/`/' || true
+          } >> "$GITHUB_STEP_SUMMARY"

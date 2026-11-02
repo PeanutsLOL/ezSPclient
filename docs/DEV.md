@@ -249,9 +249,59 @@ adb shell screencap -p /sdcard/shot.png; adb pull /sdcard/shot.png shot.png
 
 ### iOS
 
-需要 macOS + Xcode，Windows 上无法构建。代码已经按 `#[cfg(mobile)]` 分支写好，
-在 macOS 上 `pnpm tauri ios init` 后即可；同样要注意明文 HTTP 需要在 `Info.plist`
-里加 ATS 例外（`NSAppTransportSecurity` → `NSAllowsArbitraryLoads`）。
+iOS 只能在 **macOS + Xcode** 上构建，Windows / Linux 上做不了（Tauri CLI 在非 macOS 上连
+`ios` 子命令都不会注册）。代码已经按 `#[cfg(mobile)]` 分支写好，和 Android 共用同一套前端与 Rust 命令。
+
+本机（Mac）准备：
+
+```bash
+brew install xcodegen          # tauri ios init 用它生成 .xcodeproj
+rustup target add aarch64-apple-ios
+pnpm install
+pnpm ios:init                  # = tauri ios init --ci + 同步 App 图标
+```
+
+`pnpm ios:init` 会生成 `src-tauri/gen/apple/`（可再生、已 gitignore），并把
+`src-tauri/icons/ios` 的图标覆盖进模板自带的 Tauri 占位图标（`tools/sync-ios-icons.py`）——
+不覆盖的话打出来的包图标是错的。
+
+**平台配置**写在 `src-tauri/Info.ios.plist`，`tauri ios build` 会自动把它合并进生成的 Info.plist：
+
+| 键 | 作用 |
+|---|---|
+| `NSAppTransportSecurity` → `NSAllowsArbitraryLoads` | 游戏服务器是明文 HTTP，ATS 默认会拦（对应 Android 的 `usesCleartextTraffic`） |
+| `NSLocalNetworkUsageDescription` | iOS 14+ 连接局域网服务器需要用途说明才会弹授权 |
+| `UISupportedInterfaceOrientations` + `UIRequiresFullScreen` | 锁横屏 + 全屏，对应 Android 的 `sensorLandscape` + 沉浸式 |
+| `UIStatusBarHidden` / `UIViewControllerBasedStatusBarAppearance` | 隐藏状态栏，全屏留给游戏 |
+
+**签名**：`tauri ios build` 生成的是未签名包（`--no-sign`）或依赖 Apple 签名材料。
+在 Mac 上没有开发者账号时，先跑 `pnpm ios:build:unsigned` 确认能编译，再用 Xcode 打开
+`src-tauri/gen/apple/<app>.xcodeproj`，选自己的 Team 手动签名/导出；或者直接用下面的 CI。
+
+#### 用 GitHub Actions 构建（不用 Mac）
+
+[`.github/workflows/ios-release.yml`](../.github/workflows/ios-release.yml) 固定在 `macos-15`
+（Xcode 16+，`tauri ios init` 生成的工程需要）上跑：
+
+1. 手动触发（Actions → iOS release → Run workflow）或推送到 `ci/**` 分支；
+2. 没有 Apple 签名 secrets 时：编译 + archive，产物是**未签名** `.ipa` 与 `.xcarchive`
+   （ipa 需要 Sideloadly / Xcode 重签后才能装到 iPhone）；
+3. 要出可直接安装 / 上架的 `.ipa`，在仓库 **Settings → Secrets and variables → Actions** 里加：
+
+   | Secret | 内容 |
+   |---|---|
+   | `IOS_CERTIFICATE` | Apple Development / Distribution 证书 `.p12` 的 base64（`base64 -i cert.p12`） |
+   | `IOS_CERTIFICATE_PASSWORD` | 导出 .p12 时设的密码（没有密码可留空） |
+   | `IOS_MOBILE_PROVISION` | 手动创建的 `.mobileprovision` 的 base64 |
+   | `APPLE_DEVELOPMENT_TEAM` | 10 位 Team ID |
+
+   描述文件的 Bundle ID 必须是 `top.rakkasei.ezspclient`；`debugging` / `release-testing`
+   还需要把目标设备的 UDID 登记进描述文件。workflow 会先无签名 archive，再用
+   `xcodebuild -exportArchive` + 手动签名导出（Tauri 生成的工程把 `CODE_SIGN_IDENTITY`
+   写死了，直接让 `tauri ios build` 用分发描述文件签名会在导出阶段失败）。
+
+产物在 workflow 的 Artifacts 里（保留 14 天）。上传 App Store 前如果遇到 ITMS-90717
+（图标带 alpha 通道），把 `src-tauri/icons/ios/*.png` 导出成不带 alpha 的 RGB 即可。
 
 ## 7. 常见问题
 

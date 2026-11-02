@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  会被 `tauri ios build` 合并进生成的 Info.plist（见 Tauri CLI 的 merge_plist），
+  所以 iOS 的这几个平台配置写在这里，而不是去改可再生的 `gen/apple`。
+-->
+<plist version="1.0">
+<dict>
+	<!-- 游戏服务器一律是明文 HTTP（没有证书），iOS 的 App Transport Security 默认会拦掉。
+	     和 Android 的 usesCleartextTraffic=true、桌面端无限制是同一件事。 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+
+	<!-- 客户端连接的是局域网里的游戏服务器；iOS 14+ 没有用途说明就不会弹本地网络授权。 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于连接局域网内的《卫戍协议：盟约》游戏服务器。</string>
+
+	<!-- 游戏是横屏的：锁横屏并占满整屏，对应 Android 的 sensorLandscape + 沉浸式全屏。
+	     这一段会整体覆盖模板里的竖屏 + 横屏配置。 -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+</dict>
+</plist>

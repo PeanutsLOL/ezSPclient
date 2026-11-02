@@ -115,8 +115,13 @@ if (-not $gameCtx) { throw "找不到游戏 iframe 的 context（游戏没加载
 Write-Host "      游戏 context = $gameCtx"
 
 # 清掉上一局的会话（否则会直接落在结算页），然后 reload 让 iframe 回到大厅
-node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{try{localStorage.removeItem('sp.matches');localStorage.removeItem('sp.tokens');}catch(_){} location.reload(); return 'reload';})()" 2>$null | Out-Null
-Start-Sleep -Seconds 6
+$needReload = node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{try{localStorage.removeItem('sp.matches');localStorage.removeItem('sp.tokens');}catch(_){} const sc=(document.querySelector('.screen')||{}).className||''; return /result|settle/.test(sc) ? 'reload' : 'keep';})()" 2>$null
+if (("$needReload") -match "reload") {
+  node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="location.reload()" 2>$null | Out-Null
+  Start-Sleep -Seconds 6
+} else {
+  Write-Host "      当前界面可直接开局，跳过 reload"
+}
 for ($i = 0; $i -lt 20; $i++) {
   $ctxLines = node tools/cdp.mjs contexts --target=tauri.localhost 2>$null
   $hit = $ctxLines | Select-String -Pattern "ctx=(\d+).*origin=https?://$([regex]::Escape($hostPart))" | Select-Object -First 1
@@ -140,14 +145,15 @@ $flow = @"
     return false;
   };
   await sleep(800);
-  // 上一局可能还停在结算页：先退回大厅，否则点「开始」没用
-  for (let i = 0; i < 10; i++) {
+  // 一路点到大厅为止：结算页的按钮是「下一步」，标题页才是「开始」
+  for (let i = 0; i < 25; i++) {
     const sc = (document.querySelector('.screen') || {}).className || '';
-    if (!/result|settle/.test(sc)) break;
-    const back = [...document.querySelectorAll('button')].find(b => /返回|离开|退出|确定|继续|下一步|再来/.test(b.textContent));
-    if (back) { try { back.click(); } catch (_) {} }
+    if (/title-screen/.test(sc)) break;
+    const next = [...document.querySelectorAll('button')].find(b => /下一步|返回|离开|退出|继续|确定|再来/.test(b.textContent));
+    if (next) { try { next.click(); } catch (_) {} }
     await sleep(900);
   }
+
   // 新装的客户端没有代号：「开始」是灰的，先填一个
   try {
     const inp = [...document.querySelectorAll('input')].find(i => /代号|callsign/i.test(i.placeholder || ''));
@@ -214,7 +220,11 @@ $phaseRows = New-Object System.Collections.Generic.List[string]
 $phaseRows.Add("ts,screen,cpu_s") | Out-Null
 
 while ((Get-Date) -lt $deadline) {
-  $screenNow = node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{const bs=[...document.querySelectorAll('button')].filter(x=>/准备就绪/.test(x.textContent)); if(bs.length){bs.forEach(b=>{try{b.click();}catch(_){}});} return (document.querySelector('.screen')||{}).className;})()" 2>$null
+  try {
+    $screenNow = node tools/cdp.mjs eval --target=tauri.localhost --context=$gameCtx --expr="(()=>{const bs=[...document.querySelectorAll('button')].filter(x=>/准备就绪/.test(x.textContent)); if(bs.length){bs.forEach(b=>{try{b.click();}catch(_){}});} return (document.querySelector('.screen')||{}).className;})()" 2>$null
+  } catch {
+    $screenNow = "eval-failed"
+  }
   $screenText = ("$screenNow").Trim()
   $statRaw = ((& $adb @adbArgs shell cat "/proc/$devicePid/stat") -join " ").Trim()
   $cpuSec = ""

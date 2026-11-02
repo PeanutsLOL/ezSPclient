@@ -62,8 +62,9 @@ $devicePid = ((Adb "shell" "pidof" $Pkg) -join "").Trim()
 if (-not $devicePid) { throw "应用没起来" }
 Adb "forward" "tcp:$CdpPort" "localabstract:webview_devtools_remote_$devicePid" | Out-Null
 
-if ($AccelOff) {
-  node tools/cdp.mjs eval --target=tauri.localhost --expr="(async()=>{const t=window.__TAURI__.core.invoke;const s=await t('load_state');await t('update_settings',{settings:{...s.settings,performanceAcceleration:false}});return 'accel off';})()" | Out-Null
+if ($true) {
+  $wantAccel = if ($AccelOff) { "false" } else { "true" }
+  node tools/cdp.mjs eval --target=tauri.localhost --expr="(async()=>{const t=window.__TAURI__.core.invoke;const s=await t('load_state');const n=await t('update_settings',{settings:{...s.settings,performanceAcceleration:$wantAccel}});return 'accel='+n.settings.performanceAcceleration;})()" | Out-Null
   Adb "shell" "am" "force-stop" $Pkg | Out-Null
   Adb "shell" "am" "start" "-n" "$Pkg/.MainActivity" | Out-Null
   Start-Sleep -Seconds 7
@@ -88,6 +89,8 @@ $enter = @"
     const n = await t('add_server', { input: { name: 'stress', host: '$hostPart', port: $portPart, note: 'local stress' } });
     srv = n.servers.find(x => x.host === '$hostPart');
   }
+  // 关键：用 invoke 直接改 Rust 状态不会同步 snap，必须先 refresh 再 connect
+  if (typeof refresh === 'function') { await refresh(await t('load_state')); }
   if (typeof connect === 'function') { await connect(srv.id); return 'connected ' + srv.id; }
   await t('set_active', { id: srv.id });
   return 'activated ' + srv.id;

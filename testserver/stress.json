@@ -1,0 +1,19 @@
+{
+  "$comment": "压力测试用的波次配方。改这里就能改压力，不用碰游戏仓库。",
+
+  "mode": "mode_single_normal",
+  "rounds": 6,
+
+  "recipe": {
+    "$comment": "每一轮都换成同一组敌人：spawnsPerWave 个生成点，每个 count 只，间隔 interval 秒，从 time 秒开始。",
+    "spawnsPerWave": 2,
+    "count": 14,
+    "interval": 1.5,
+    "time": 1,
+    "routeIndex": 0
+  },
+
+  "overrides": {
+    "$comment": "想给某一轮单独配方就写在这里，键是轮次（1 起）。留空表示全用 recipe。"
+  }
+}

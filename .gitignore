@@ -36,6 +36,12 @@ dist/
 logs/
 *.log
 
+# 压力测试服务器（testserver/）的运行期产物
+testserver/*.log
+testserver/*.csv
+testserver/runtime/
+testserver/node_modules/
+
 # 编辑器与系统
 .idea/
 .vscode/*

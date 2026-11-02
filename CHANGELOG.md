@@ -5,6 +5,15 @@
 
 ## [未发布]
 
+### 计划
+
+见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+
+## [0.3.0] - 2026-11-03
+
+这一版只做一件事：把「手机发烫」和「低端机白屏」查清楚并量化解决。所有结论都来自真机实测
+（Redmi 25053RT47C / Android 16 / WebView 156 / 1280×2772 / DPR 3.25 / 8 核 / 11233 MB）。
+
 ### 性能与移动端兼容
 
 - **后台防发热（P0）**：在 Android 原生生命周期重写 `onPause` / `onResume`，切后台或锁屏时暂停 Chromium JS 定时器（`pauseTimers()`），切回时恢复；彻底消除退后台后游戏循环持续高占用发热的问题
@@ -29,7 +38,7 @@
   现在补丁拆到 `tools/patch-client.py`，并由 `app/build.gradle.kts` 里的 `ezspPatchClient` 任务在 Kotlin 编译前重打；
   实测新包 dex 含拦截实现，真机/模拟器上 `fetch('/js/battle/simWorker.js')` 返回的是优化版（含 `Local Interceptor` 标记）
 
-### 迭代二（渲染倍率自适应与缓存治理）
+### 渲染倍率与缓存治理
 
 - **渲染倍率新增「自动」档（新默认）**：按设备内存与核心数选倍率 —— `isLowRamDevice` / 总内存 ≤ 4 GB / 核心数 ≤ 4 时用 1.0×，
   其余 1.5×。高配机与原来的 1.5× 完全等价（观感不变），低端机自动省一半像素。实测模拟器（4 核 / 3939 MB / lowRam）
@@ -44,7 +53,7 @@
   由 `patch-client.py` 在每次构建前复制进生成工程，`gen/` 保持“随时可删可重建”
 - 诊断：`LocalInterceptor` 在 logcat（tag `ezSPclient`）打印倍率决策与缓存命中/未命中（限前 20 条）
 
-### 迭代三（撤掉重复的素材缓存，改攻 CPU 侧）
+### 撤掉与游戏侧重复的素材缓存
 
 - **撤掉外壳自建的素材磁盘缓存**：游戏自己已经用 CacheStorage 持久化素材（`js/assetCache.js` 的
   `cache.put(url, response)`，配套「下载完整素材 / 导入素材包 / 申请持久化存储」），外壳再存一份是双倍占用、
@@ -64,7 +73,7 @@
   `is-embedded`，把 `.topbar / .layout / .statusbar` 设为 `display:none`。实测内嵌时
   `getComputedStyle('.layout').display === 'none'`，退出后恢复 `grid`、`#embed-layer` 已移除
 
-### 迭代四（真机实测：撤掉两处「自以为省电」的改动）
+### 真机实测：撤掉两处减帧改动
 
 在 Redmi 25053RT47C（Android 16 / WebView 156 / 1280×2772 / DPR 3.25 / 8 核 / 11233 MB）上接入 CDP 实测：
 
@@ -79,7 +88,7 @@
 - **排除的怀疑**：曾怀疑浮球（`box-shadow` + `translateZ` + 半透明）压着 WebGL 导致掉帧，
   用「每秒窗口」方式连测 12 秒发现 fps 与浮球显隐无关（59/60/57 → 30/30/30），该假设不成立
 
-### 迭代五（真机 168 秒温度/CPU 对照：接管确实降温）
+### 168 秒温度/CPU 对照
 
 同一张图（独立模拟 / 标准模拟 AC-1）、同一套自动化、各 168 秒，用 `tools/sample-heat.ps1` 每 5 秒采样
 （电池温度 / CPU 各核温度 / 进程累计 CPU 秒数）：

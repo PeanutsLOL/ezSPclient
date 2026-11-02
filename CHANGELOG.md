@@ -64,6 +64,21 @@
   `is-embedded`，把 `.topbar / .layout / .statusbar` 设为 `display:none`。实测内嵌时
   `getComputedStyle('.layout').display === 'none'`，退出后恢复 `grid`、`#embed-layer` 已移除
 
+### 迭代四（真机实测：撤掉两处「自以为省电」的改动）
+
+在 Redmi 25053RT47C（Android 16 / WebView 156 / 1280×2772 / DPR 3.25 / 8 核 / 11233 MB）上接入 CDP 实测：
+
+- **撤掉「钉死 60Hz 屏幕刷新率」**：同一画面（`gm--prep` 商店阶段）对比 —
+  钉 60Hz 时 WebView 的 rAF 只有 **30 fps**；恢复面板默认刷新率后 **59.9 fps**；完全关掉接管的基线是 120.5 fps。
+  也就是说「把面板钉到 60Hz」在这台机器上等于把 vsync 减半，观感直接崩掉。省电改由渲染倍率与画质承担
+- **撤掉 rAF「自适应降档到 30fps」**：真机上它一旦因启动抖动越阈值就永久锁 30fps（只降不升），属于自伤
+- 保留并实测有效的项：`renderScale auto → 1.5`（8 核 / 11 GB 判为高配）、`devicePixelRatio` 在游戏 iframe 内生效为 1.5、
+  `[intercept] interceptor active`、`simWorker.js` 被替换为优化实现、注入层成功抓到 Pixi 实例（`__ezspRender()` 可读 fps/resolution）
+- 真机（接管开、无刷新率锁、1.5 倍率）复测：**59.9 fps 稳定**，`gfxinfo` 50th **11 ms**（钉 60Hz 时是 17 ms），GPU 50th 3 ms，
+  整机 CPU ≈105%（接管关闭时为 129%，但那是以 120 fps 跑的，场景与帧率都不同，不能直接当同比）
+- **排除的怀疑**：曾怀疑浮球（`box-shadow` + `translateZ` + 半透明）压着 WebGL 导致掉帧，
+  用「每秒窗口」方式连测 12 秒发现 fps 与浮球显隐无关（59/60/57 → 30/30/30），该假设不成立
+
 ### 工具
 
 - 新增 `tools/cdp.mjs`：本机 WebView2 / Android WebView 的 CDP 客户端（`list` / `eval` / `contexts` / `nav` / `logs` / `profile` / `metrics`）

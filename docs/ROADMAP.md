@@ -59,11 +59,13 @@ VizWebView     15~19%
 
 ## P4：工程与验证
 
-- **真机自动化回归脚本**：把这次用的 `cdp.mjs` + `prof.mjs` + `sample-heat.ps1` 串成
-  `pnpm perf:baseline` / `pnpm perf:compare`，避免下次又手敲一遍。
+- **本地压力测试环境**：已提供 `tools/stress.ps1` + [STRESS.md](STRESS.md)（本机起游戏服务器 →
+  `adb reverse` → 固定难度跑一组采样）。下一步把「跑两组并自动出对比表」也做进去
+  （现在是 `-AccelOff` 分两次跑、人眼看两个 summary）。
+- **真机自动化回归**：把 `cdp.mjs` + `prof.mjs` + `sample-heat.ps1` 串成 `pnpm perf:compare`。
 - **iOS 侧未验证**：workflow 能出包，但 `pauseTimers`、返回键、注入这些改动都没有 iOS 实测数据。
-- `setting.schema` 没有版本迁移：目前 `Settings` 靠 serde 默认值兜底，字段多了以后要引入
-  `version` 迁移（`servers.json` 已有 `version`，`settings.json` 还没有）。
+- `settings.json` 没有 schema 版本：目前靠 serde 默认值兜底，字段多了要引入迁移
+  （`servers.json` 已有 `version`）。
 
 ## 测量方法（别再用瞬时 `top %CPU`）
 

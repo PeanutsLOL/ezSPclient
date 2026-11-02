@@ -45,6 +45,7 @@ pnpm tauri build    # 打包
 - [docs/DESIGN.md](docs/DESIGN.md) —— 目标、架构、数据模型、多平台策略与取舍
 - [docs/DEV.md](docs/DEV.md) —— 环境准备、构建、调试、移动端
 - [docs/ROADMAP.md](docs/ROADMAP.md) —— 还没做的事，以及判断优先级所依据的实测数据
+- [docs/STRESS.md](docs/STRESS.md) —— 本地压力测试环境（自建服务器 + 固定场景采样）
 - [CHANGELOG.md](CHANGELOG.md) —— 版本记录
 
 ## 与游戏本体的关系
